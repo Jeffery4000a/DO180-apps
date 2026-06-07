@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Drop Merge — Web Demo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:     #060610;
+    --panel:  #0a0a1a;
+    --border: rgba(255,255,255,0.08);
+    --accent: #7c4dff;
+    --cyan:   #00d4ff;
+  }
+
+  body {
+    background: var(--bg);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100dvh;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  #header {
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .score-block { display: flex; flex-direction: column; gap: 2px; min-width: 100px; }
+  .score-label { font-size: 10px; font-weight: 700; color: #555; letter-spacing: 1.5px; }
+  .score-value { font-size: 22px; font-weight: 900; color: #fff; }
+  .game-brand { font-size: 13px; font-weight: 900; color: var(--accent); letter-spacing: 3px; }
+  #undo-btn {
+    background: rgba(255,255,255,0.07); border: none; border-radius: 10px;
+    padding: 6px 12px; cursor: pointer; color: #fff; font-size: 18px;
+    display: flex; flex-direction: column; align-items: center; gap: 0;
+  }
+  #undo-btn span { font-size: 10px; color: #888; font-weight: 700; }
+  #undo-btn:disabled { opacity: 0.3; cursor: default; }
+
+  /* ── Controls row ── */
+  #controls {
+    width: 100%; max-width: 420px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px;
+    gap: 12px;
+  }
+  .tile-preview { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .preview-label { font-size: 10px; font-weight: 700; color: #555; letter-spacing: 1px; }
+
+  /* ── Grid ── */
+  #grid-wrapper {
+    width: 100%; max-width: 420px;
+    display: flex; justify-content: center;
+    padding: 0 8px;
+  }
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0;
+    width: 100%;
+  }
+  .column {
+    display: flex; flex-direction: column;
+    cursor: pointer; position: relative;
+  }
+  .column:hover .drop-arrow { opacity: 1; }
+  .column.full { cursor: not-allowed; }
+  .column.bomb-mode:not(.full) { cursor: crosshair; }
+
+  .drop-indicator {
+    height: 24px; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: var(--accent); opacity: 0.5;
+    transition: opacity 0.15s;
+  }
+  .drop-indicator.full-mark { color: #ff1744; opacity: 0.8; font-weight: 900; }
+  .drop-indicator.bomb-mark { color: #ff3300; opacity: 1; }
+
+  .cell {
+    aspect-ratio: 1;
+    border-radius: 5px;
+    margin: 1px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    background: #0a0a16;
+    position: relative;
+    transition: transform 0.1s ease;
+  }
+  .cell.occupied {
+    border-width: 1.5px;
+    border-style: solid;
+  }
+  .cell.merging {
+    animation: mergePop 0.28s ease forwards;
+  }
+  .cell.dropping {
+    animation: dropIn 0.12s ease forwards;
+  }
+  @keyframes mergePop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.35); }
+    100% { transform: scale(1); }
+  }
+  @keyframes dropIn {
+    0%   { transform: scaleY(0.6) translateY(-10px); opacity: 0.5; }
+    100% { transform: scaleY(1)   translateY(0);     opacity: 1; }
+  }
+
+  /* ── Tile colors ── */
+  .t2    { background:#0d2137; border-color:#00aaff; color:#fff;    box-shadow:0 0 6px #00aaff55; }
+  .t4    { background:#0a2e1f; border-color:#00ff88; color:#fff;    box-shadow:0 0 6px #00ff8855; }
+  .t8    { background:#2e1a00; border-color:#ffaa00; color:#fff;    box-shadow:0 0 6px #ffaa0055; }
+  .t16   { background:#2e1800; border-color:#ff7700; color:#fff;    box-shadow:0 0 6px #ff770055; }
+  .t32   { background:#3a0d0d; border-color:#ff3300; color:#fff;    box-shadow:0 0 6px #ff330055; }
+  .t64   { background:#2a0a35; border-color:#cc00ff; color:#fff;    box-shadow:0 0 6px #cc00ff55; }
+  .t128  { background:#180a35; border-color:#7700ff; color:#ddd;    box-shadow:0 0 6px #7700ff55; }
+  .t256  { background:#080f35; border-color:#0044ff; color:#ccd;    box-shadow:0 0 6px #0044ff55; }
+  .t512  { background:#001a1a; border-color:#00ffff; color:#b0ffff; box-shadow:0 0 8px #00ffff66; }
+  .t1024 { background:#1a1a00; border-color:#ffee00; color:#fff176; box-shadow:0 0 8px #ffee0066; }
+  .t2048 { background:#2a1400; border-color:#ffd700; color:#ffd700; box-shadow:0 0 12px #ffd70088; }
+
+  /* ── Hint ── */
+  #hint {
+    padding: 8px 16px; font-size: 12px; color: #333; text-align: center;
+    width: 100%; max-width: 420px;
+  }
+
+  /* ── Bomb button ── */
+  #bomb-btn {
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 8px 14px; cursor: pointer; color: #fff;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-size: 22px; min-width: 58px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  #bomb-btn span { font-size: 10px; color: #888; font-weight: 700; }
+  #bomb-btn.active { background: rgba(255,51,0,0.15); border-color: #ff3300; }
+  #bomb-btn:disabled { opacity: 0.3; cursor: default; }
+
+  /* ── Score float ── */
+  .score-float {
+    position: fixed; pointer-events: none;
+    font-size: 18px; font-weight: 900; color: #ffd700;
+    animation: floatUp 0.7s ease forwards;
+    z-index: 100;
+  }
+  @keyframes floatUp {
+    0%   { opacity: 1; transform: translateY(0); }
+    100% { opacity: 0; transform: translateY(-50px); }
+  }
+
+  /* ── Game Over overlay ── */
+  #overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(6,6,16,0.92); backdrop-filter: blur(8px);
+    flex-direction: column; align-items: center; justify-content: center;
+    z-index: 200; gap: 16px;
+    animation: fadeIn 0.4s ease;
+  }
+  #overlay.visible { display: flex; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .go-emoji { font-size: 64px; }
+  .go-title { font-size: 28px; font-weight: 900; letter-spacing: 3px; }
+  .go-score-label { font-size: 12px; font-weight: 700; color: #555; letter-spacing: 2px; }
+  .go-score { font-size: 64px; font-weight: 900; color: var(--accent); line-height: 1; }
+
+  .best-tile-box {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px; padding: 16px 24px;
+  }
+  .best-tile-label { font-size: 10px; font-weight: 700; color: #555; letter-spacing: 1.5px; }
+  .best-tile-mini {
+    width: 54px; height: 54px; border-radius: 8px; border: 2px solid;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 900;
+  }
+
+  .play-again-btn {
+    background: linear-gradient(90deg, var(--accent), var(--cyan));
+    border: none; border-radius: 50px; padding: 18px 48px;
+    font-size: 20px; font-weight: 900; color: #fff; letter-spacing: 3px;
+    cursor: pointer; width: 80%; max-width: 300px;
+  }
+  .play-again-btn:hover { opacity: 0.9; }
+
+  /* ── Ad placeholder banner (demo) ── */
+  #ad-banner {
+    width: 100%; max-width: 420px; height: 50px;
+    background: rgba(255,255,255,0.03); border: 1px dashed rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: #333; letter-spacing: 1px; margin-top: auto;
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div class="score-block">
+    <span class="score-label">SCORE</span>
+    <span class="score-value" id="score-display">0</span>
+  </div>
+  <span class="game-brand">DROP MERGE</span>
+  <button id="undo-btn" title="Undo last move">↩<span id="undo-label">×3</span></button>
+</div>
+
+<!-- Controls: current tile | next tile | bomb -->
+<div id="controls">
+  <div class="tile-preview">
+    <span class="preview-label">NEXT</span>
+    <div class="cell occupied" id="next-preview" style="width:42px;height:42px;font-size:14px;border-radius:6px;"></div>
+  </div>
+  <div class="tile-preview">
+    <span class="preview-label">NOW</span>
+    <div class="cell occupied" id="current-preview" style="width:50px;height:50px;font-size:16px;border-radius:6px;"></div>
+  </div>
+  <button id="bomb-btn" title="Bomb power-up (future: watch ad)">💣<span id="bomb-label">ADS</span></button>
+</div>
+
+<!-- Grid -->
+<div id="grid-wrapper">
+  <div id="grid"></div>
+</div>
+
+<!-- Hint -->
+<div id="hint">Tap a column to drop · Same tiles merge · Reach 2048</div>
+
+<!-- Ad banner placeholder -->
+<div id="ad-banner">[ BANNER AD — Google AdMob ]</div>
+
+<!-- Game Over overlay -->
+<div id="overlay">
+  <span class="go-emoji" id="go-emoji">💀</span>
+  <span class="go-title" id="go-title">GAME OVER</span>
+  <span class="go-score-label">SCORE</span>
+  <span class="go-score" id="go-score">0</span>
+  <div class="best-tile-box">
+    <span class="best-tile-label">BEST TILE REACHED</span>
+    <div class="best-tile-mini" id="go-best-tile"></div>
+  </div>
+  <button class="play-again-btn" onclick="initGame()">PLAY AGAIN</button>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const COLS = 6, ROWS = 12;
+
+const TILE_COLORS = {
+  2:    { bg:'#0d2137', glow:'#00aaff', text:'#fff' },
+  4:    { bg:'#0a2e1f', glow:'#00ff88', text:'#fff' },
+  8:    { bg:'#2e1a00', glow:'#ffaa00', text:'#fff' },
+  16:   { bg:'#2e1800', glow:'#ff7700', text:'#fff' },
+  32:   { bg:'#3a0d0d', glow:'#ff3300', text:'#fff' },
+  64:   { bg:'#2a0a35', glow:'#cc00ff', text:'#fff' },
+  128:  { bg:'#180a35', glow:'#7700ff', text:'#e0d4ff' },
+  256:  { bg:'#080f35', glow:'#0044ff', text:'#c4d4ff' },
+  512:  { bg:'#001a1a', glow:'#00ffff', text:'#b0ffff' },
+  1024: { bg:'#1a1a00', glow:'#ffee00', text:'#fff176' },
+  2048: { bg:'#2a1400', glow:'#ffd700', text:'#ffd700' },
+};
+
+const SPAWN_TABLE = [[2,45],[4,30],[8,15],[16,7],[32,3]];
+const TOTAL_W = SPAWN_TABLE.reduce((s,[,w])=>s+w,0);
+
+function randTileVal() {
+  let r = Math.random() * TOTAL_W;
+  for (const [v,w] of SPAWN_TABLE) { if (r < w) return v; r -= w; }
+  return 2;
+}
+
+// ── Game state ─────────────────────────────────────────────────────────────
+let grid, score, current, next, undosLeft, bombMode, bombAvail;
+let prevGrid, prevScore, prevCurrent;
+let gameOver, highScore = 0, highBestTile = 0;
+
+function initGame() {
+  grid     = Array.from({length: COLS}, () => []);
+  score    = 0;
+  current  = randTileVal();
+  next     = randTileVal();
+  undosLeft = 3;
+  bombMode  = false;
+  bombAvail = false;
+  prevGrid  = null;
+  gameOver  = false;
+
+  document.getElementById('overlay').classList.remove('visible');
+  document.getElementById('bomb-btn').disabled = false;
+  render();
+}
+
+// ── Drop logic ─────────────────────────────────────────────────────────────
+function drop(col) {
+  if (gameOver) return;
+  if (grid[col].length >= ROWS) return;
+
+  if (bombMode) {
+    execBomb(col);
+    return;
+  }
+
+  // Snapshot for undo
+  prevGrid    = grid.map(c => [...c]);
+  prevScore   = score;
+  prevCurrent = current;
+
+  // Push tile
+  const dropped = current;
+  grid[col].push(dropped);
+
+  // Cascade merge
+  let gained = 0;
+  let formed2048 = false;
+  while (grid[col].length >= 2) {
+    const top   = grid[col][grid[col].length - 1];
+    const below = grid[col][grid[col].length - 2];
+    if (top !== below) break;
+    const merged = top * 2;
+    grid[col].pop();
+    grid[col][grid[col].length - 1] = merged;
+    gained += merged;
+    if (merged === 2048) { gained += 4096; grid[col].pop(); formed2048 = true; break; }
+  }
+
+  score += gained;
+
+  // Float score label
+  if (gained > 0) floatScore(col, gained);
+
+  // Advance tile queue
+  current = next;
+  next    = randTileVal();
+
+  // Update undo label
+  document.getElementById('undo-label').textContent =
+    undosLeft > 0 ? `×${undosLeft}` : '📺';
+
+  render(col, gained > 0 ? grid[col].length - 1 : -1);
+
+  // Check game over (all columns full)
+  if (grid.every(c => c.length >= ROWS)) {
+    triggerGameOver();
+  }
+}
+
+function triggerGameOver() {
+  gameOver = true;
+  const bestTile = grid.flat().reduce((m,v) => Math.max(m,v), 2);
+  if (score > highScore) highScore = score;
+  if (bestTile > highBestTile) highBestTile = bestTile;
+
+  setTimeout(() => {
+    const tc = TILE_COLORS[bestTile] || TILE_COLORS[2048];
+    document.getElementById('go-emoji').textContent  = score >= highScore ? '🏆' : '💀';
+    document.getElementById('go-title').textContent  = score >= highScore ? 'NEW RECORD!' : 'GAME OVER';
+    document.getElementById('go-score').textContent  = score.toLocaleString();
+    const btEl = document.getElementById('go-best-tile');
+    btEl.textContent       = bestTile;
+    btEl.style.background  = tc.bg;
+    btEl.style.borderColor = tc.glow;
+    btEl.style.color       = tc.text;
+    document.getElementById('overlay').classList.add('visible');
+  }, 500);
+}
+
+// ── Undo ──────────────────────────────────────────────────────────────────
+document.getElementById('undo-btn').addEventListener('click', () => {
+  if (!prevGrid || gameOver) return;
+  if (undosLeft > 0) {
+    grid    = prevGrid;
+    score   = prevScore;
+    current = prevCurrent;
+    undosLeft--;
+    prevGrid = null;
+    render();
+  }
+  // (In the RN app, when undosLeft=0 it shows a rewarded ad)
+});
+
+// ── Bomb ─────────────────────────────────────────────────────────────────
+document.getElementById('bomb-btn').addEventListener('click', () => {
+  if (gameOver) return;
+  if (!bombAvail) {
+    // In RN app: showBombAd() — for demo, just give it free once
+    bombAvail = true;
+    document.getElementById('bomb-label').textContent = 'USE';
+  }
+  bombMode = !bombMode;
+  document.getElementById('bomb-btn').classList.toggle('active', bombMode);
+  document.getElementById('hint').textContent =
+    bombMode ? 'Tap a column to destroy its top tile' : 'Tap a column to drop · Same tiles merge · Reach 2048';
+  renderDropIndicators();
+});
+
+function execBomb(col) {
+  if (grid[col].length === 0) return;
+  grid[col].pop();
+  bombMode  = false;
+  bombAvail = false;
+  document.getElementById('bomb-btn').classList.remove('active');
+  document.getElementById('bomb-label').textContent = 'ADS';
+  document.getElementById('hint').textContent = 'Tap a column to drop · Same tiles merge · Reach 2048';
+  render();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+function buildGrid() {
+  const gridEl = document.getElementById('grid');
+  gridEl.innerHTML = '';
+  for (let c = 0; c < COLS; c++) {
+    const colEl = document.createElement('div');
+    colEl.className = 'column';
+    colEl.dataset.col = c;
+    colEl.addEventListener('click', () => drop(c));
+
+    // Drop indicator
+    const ind = document.createElement('div');
+    ind.className = 'drop-indicator';
+    ind.dataset.colInd = c;
+    colEl.appendChild(ind);
+
+    // Cell rows (top → bottom)
+    for (let r = 0; r < ROWS; r++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.col = c;
+      cell.dataset.row = r;
+      colEl.appendChild(cell);
+    }
+    gridEl.appendChild(colEl);
+  }
+}
+
+function render(droppedCol = -1, mergeRow = -1) {
+  updateScoreDisplay();
+  updateTilePreviews();
+  updateDropIndicators();
+
+  for (let c = 0; c < COLS; c++) {
+    for (let r = 0; r < ROWS; r++) {
+      // grid[c][0]=bottom → screen row ROWS-1; grid[c][last]=top → lowest occupied screen row
+      const stackIdx = ROWS - 1 - r;
+      const val = grid[c][stackIdx];
+      const cell = document.querySelector(`.cell[data-col="${c}"][data-row="${r}"]`);
+      if (!cell) continue;
+      cell.className = 'cell';
+      cell.textContent = '';
+      cell.style = '';
+
+      if (val) {
+        const tc = TILE_COLORS[val] || TILE_COLORS[2048];
+        cell.style.background   = tc.bg;
+        cell.style.borderColor  = tc.glow;
+        cell.style.color        = tc.text;
+        cell.style.borderWidth  = '1.5px';
+        cell.style.borderStyle  = 'solid';
+        cell.style.boxShadow    = `0 0 6px ${tc.glow}55`;
+        cell.classList.add('occupied');
+        cell.textContent = val;
+        cell.style.fontSize = fontSize(val) + 'px';
+
+        // Animations
+        if (c === droppedCol && stackIdx === grid[c].length - 1) {
+          cell.classList.add('dropping');
+        }
+        if (c === droppedCol && stackIdx === grid[c].length - 1 && mergeRow >= 0) {
+          setTimeout(() => cell.classList.add('merging'), 60);
+        }
+      }
+    }
+  }
+}
+
+function updateScoreDisplay() {
+  document.getElementById('score-display').textContent = score.toLocaleString();
+  const undoBtn = document.getElementById('undo-btn');
+  undoBtn.disabled = !prevGrid;
+  document.getElementById('undo-label').textContent =
+    undosLeft > 0 ? `×${undosLeft}` : '📺';
+}
+
+function updateTilePreviews() {
+  applyTileStyle(document.getElementById('current-preview'), current);
+  applyTileStyle(document.getElementById('next-preview'),    next);
+}
+
+function applyTileStyle(el, val) {
+  const tc = TILE_COLORS[val] || TILE_COLORS[2048];
+  el.style.background  = tc.bg;
+  el.style.borderColor = tc.glow;
+  el.style.color       = tc.text;
+  el.style.borderWidth = '1.5px';
+  el.style.borderStyle = 'solid';
+  el.style.boxShadow   = `0 0 8px ${tc.glow}66`;
+  el.textContent       = val;
+  el.style.fontSize    = fontSize(val) + 'px';
+  el.classList.add('occupied');
+}
+
+function updateDropIndicators() {
+  for (let c = 0; c < COLS; c++) {
+    const ind = document.querySelector(`[data-col-ind="${c}"]`);
+    const colEl = document.querySelector(`.column[data-col="${c}"]`);
+    if (!ind || !colEl) continue;
+    const full = grid[c].length >= ROWS;
+    colEl.classList.toggle('full', full);
+    colEl.classList.toggle('bomb-mode', bombMode && !full);
+    if (full) {
+      ind.textContent = '✕';
+      ind.className   = 'drop-indicator full-mark';
+    } else if (bombMode) {
+      ind.textContent = '💣';
+      ind.className   = 'drop-indicator bomb-mark';
+    } else {
+      ind.textContent = '▼';
+      ind.className   = 'drop-indicator drop-arrow';
+    }
+  }
+}
+
+function renderDropIndicators() { updateDropIndicators(); }
+
+function fontSize(v) {
+  if (v < 100)  return 15;
+  if (v < 1000) return 12;
+  return 10;
+}
+
+// ── Score float effect ─────────────────────────────────────────────────────
+function floatScore(col, gained) {
+  const colEl = document.querySelector(`.column[data-col="${col}"]`);
+  if (!colEl) return;
+  const rect = colEl.getBoundingClientRect();
+  const el   = document.createElement('div');
+  el.className   = 'score-float';
+  el.textContent = `+${gained.toLocaleString()}`;
+  el.style.left  = rect.left + rect.width / 2 - 24 + 'px';
+  el.style.top   = rect.top  + 60 + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 800);
+}
+
+// ── Responsive tile sizing ─────────────────────────────────────────────────
+function sizeTiles() {
+  const w = Math.min(window.innerWidth, 420) - 16;
+  const h = window.innerHeight - 200;
+  const tileSize = Math.floor(Math.min(w / COLS, h / ROWS)) - 2;
+  document.querySelectorAll('.cell').forEach(c => {
+    c.style.width  = tileSize + 'px';
+    c.style.height = tileSize + 'px';
+  });
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+buildGrid();
+initGame();
+sizeTiles();
+window.addEventListener('resize', sizeTiles);
+</script>
+</body>
+</html>
