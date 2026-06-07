@@ -4,19 +4,27 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const RULES = [
-  { icon: '🫧', title: 'Pop Bubbles',      desc: 'Tap any bubble to pop it and earn points.' },
-  { icon: '⭐', title: 'Gold Bubbles',     desc: 'Worth 10 points — rare and valuable!' },
-  { icon: '🔵', title: 'Small Bubbles',    desc: 'Worth 5 pts. Tiny but mighty.' },
-  { icon: '🟣', title: 'Medium Bubbles',   desc: 'Worth 3 pts. Most common.' },
-  { icon: '🟠', title: 'Large Bubbles',    desc: 'Worth 1 pt. Easy to hit.' },
-  { icon: '💣', title: 'Avoid Bombs!',     desc: 'Tapping a bomb costs 1 life. 3 strikes = game over.' },
-  { icon: '⏱', title: '30-Second Rounds', desc: 'Pop as many as you can before time runs out.' },
-  { icon: '📺', title: 'Watch Ads',        desc: 'Watch a short video after a round to earn +15 bonus seconds.' },
+  { icon: '⬇️',  title: 'Drop Tiles',        desc: 'Tap any column to drop the current tile into it. The tile falls to the lowest available position.' },
+  { icon: '🔗',  title: 'Merge to Score',     desc: 'When two identical tiles stack on each other, they merge into one tile worth double the value.' },
+  { icon: '⚡',  title: 'Chain Reactions',    desc: 'A single drop can trigger cascading merges: 2+2→4, then 4+4→8, and so on. These score huge points.' },
+  { icon: '⭐',  title: 'Reach 2048',         desc: 'Forming a 2048 tile earns 4096 bonus points and clears that tile — giving you breathing room.' },
+  { icon: '↩️',  title: 'Undo Last Drop',     desc: 'Changed your mind? Undo reverses your last move. You get 3 free per game. Watch an ad for unlimited undos.' },
+  { icon: '💣',  title: 'Bomb Power-Up',      desc: 'Watch an ad to earn a Bomb. Activate it, then tap any column to destroy its top tile.' },
+  { icon: '📺',  title: 'Continue Playing',   desc: 'When the board fills up, watch a video ad to clear the top of each column and keep your score.' },
+  { icon: '💀',  title: 'Game Over',          desc: 'When every column is completely full with no legal drops remaining, the game ends.' },
+];
+
+const TIPS = [
+  'Keep the tallest column in the center — easier to set up chain merges.',
+  'Never fill one column all the way — you need flexibility to undo.',
+  'Small tiles (2, 4) pile up fast. Try to merge them before they reach the top.',
+  'A chain merge from a single 2-drop is worth far more than individual scores.',
+  'Plan 2-3 drops ahead to set up a high-value cascade.',
 ];
 
 export default function HowToPlayScreen({ navigation }) {
   return (
-    <LinearGradient colors={['#0a0a1a', '#1a0a2e']} style={styles.fill}>
+    <LinearGradient colors={['#060610', '#0a0a1a']} style={styles.fill}>
       <SafeAreaView style={styles.safe}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -30,7 +38,7 @@ export default function HowToPlayScreen({ navigation }) {
           {RULES.map((r, i) => (
             <View key={i} style={styles.ruleCard}>
               <Text style={styles.ruleIcon}>{r.icon}</Text>
-              <View style={styles.ruleText}>
+              <View style={styles.ruleBody}>
                 <Text style={styles.ruleTitle}>{r.title}</Text>
                 <Text style={styles.ruleDesc}>{r.desc}</Text>
               </View>
@@ -38,14 +46,10 @@ export default function HowToPlayScreen({ navigation }) {
           ))}
 
           <View style={styles.tipBox}>
-            <Text style={styles.tipHeader}>💡 Revenue Tips (for Developers)</Text>
-            <Text style={styles.tipBody}>
-              • Banner ads show on Home & Game Over screens{'\n'}
-              • Interstitials appear every 2nd game over{'\n'}
-              • Rewarded ads are user-initiated (highest eCPM){'\n'}
-              • Add mediation (ironSource, Meta AN) in AdMob{'\n'}
-              • Target eCPM: $5–$15 for rewarded, $1–$5 for interstitials
-            </Text>
+            <Text style={styles.tipHeader}>🧠 Strategy Tips</Text>
+            {TIPS.map((t, i) => (
+              <Text key={i} style={styles.tipItem}>• {t}</Text>
+            ))}
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -58,25 +62,26 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#ffffff15',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#ffffff12',
   },
   backBtn: { padding: 4 },
   backText: { color: '#7c4dff', fontSize: 16, fontWeight: '600' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: '800' },
-  list: { padding: 20, gap: 12 },
+  list: { padding: 16, gap: 10 },
   ruleCard: {
     flexDirection: 'row', alignItems: 'flex-start',
-    backgroundColor: '#ffffff0a', borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: '#ffffff12',
+    backgroundColor: '#ffffff08', borderRadius: 14, padding: 16,
+    borderWidth: 1, borderColor: '#ffffff10',
   },
-  ruleIcon: { fontSize: 32, marginRight: 16, minWidth: 40 },
-  ruleText: { flex: 1 },
-  ruleTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  ruleDesc: { color: '#999', fontSize: 14, lineHeight: 20 },
+  ruleIcon: { fontSize: 28, marginRight: 14, minWidth: 36 },
+  ruleBody: { flex: 1 },
+  ruleTitle: { color: '#fff', fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  ruleDesc: { color: '#888', fontSize: 13, lineHeight: 20 },
   tipBox: {
-    backgroundColor: '#7c4dff20', borderRadius: 16, padding: 20,
-    borderWidth: 1, borderColor: '#7c4dff40', marginTop: 8,
+    backgroundColor: '#7c4dff18', borderRadius: 14, padding: 18,
+    borderWidth: 1, borderColor: '#7c4dff40', marginTop: 4,
   },
-  tipHeader: { color: '#7c4dff', fontSize: 15, fontWeight: '800', marginBottom: 10 },
-  tipBody: { color: '#bbb', fontSize: 13, lineHeight: 22 },
+  tipHeader: { color: '#7c4dff', fontSize: 15, fontWeight: '800', marginBottom: 12 },
+  tipItem: { color: '#aaa', fontSize: 13, lineHeight: 22 },
 });

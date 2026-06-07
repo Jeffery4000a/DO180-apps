@@ -1,245 +1,487 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableWithoutFeedback, StyleSheet,
-  Animated, Dimensions, Platform,
+  View, Text, TouchableOpacity, StyleSheet,
+  Animated, Dimensions, Platform, StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { createBubble, getSpawnInterval, hitTest, GAME_DURATION } from '../utils/gameLogic';
 
-const { width, height } = Dimensions.get('window');
-const FPS = 60;
-const FRAME_MS = 1000 / FPS;
+import useRewardedAd from '../components/useRewardedAd';
+import {
+  GRID_COLS, GRID_ROWS, TILE_SIZE, TILES,
+  createEmptyGrid, canDropInCol, isGameOver, getMaxTile,
+  dropTile, bombColumn, applyContinue,
+  getRandomTileValue, tileFontSize,
+} from '../utils/gameLogic';
 
-// A single animated bubble rendered as a View
-function Bubble({ bubble, onPop }) {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+// ─── Tile Cell ────────────────────────────────────────────────────────────────
 
-  function handlePop() {
-    Animated.sequence([
-      Animated.spring(scaleAnim, { toValue: 1.6, useNativeDriver: true, speed: 60 }),
-      Animated.timing(scaleAnim, { toValue: 0, duration: 100, useNativeDriver: true }),
-    ]).start(() => onPop(bubble));
-  }
+function TileCell({ tile, animValue, size }) {
+  const style = tile ? TILES[tile.value] ?? TILES[2048] : null;
+  const fontSize = tile ? tileFontSize(tile.value) : 14;
 
   return (
-    <TouchableWithoutFeedback onPress={handlePop}>
-      <Animated.View
-        style={[styles.bubble, {
-          width: bubble.radius * 2,
-          height: bubble.radius * 2,
-          borderRadius: bubble.radius,
-          backgroundColor: bubble.isBomb ? '#ff1744' : bubble.color + 'cc',
-          borderColor: bubble.color,
-          left: bubble.x - bubble.radius,
-          top: bubble.y - bubble.radius,
-          transform: [{ scale: scaleAnim }],
-        }]}
-      >
-        <Text style={styles.bubbleIcon}>{bubble.isBomb ? '💣' : bubble.type === 'gold' ? '⭐' : '●'}</Text>
-      </Animated.View>
-    </TouchableWithoutFeedback>
+    <Animated.View
+      style={[
+        styles.cell,
+        { width: size, height: size, borderRadius: 6 },
+        style && {
+          backgroundColor: style.bg,
+          borderColor: style.glow,
+          borderWidth: 1.5,
+          shadowColor: style.glow,
+          shadowOpacity: 0.6,
+          shadowRadius: 4,
+          elevation: 4,
+        },
+        animValue && { transform: [{ scale: animValue }] },
+      ]}
+    >
+      {tile && (
+        <Text style={[styles.tileText, { fontSize, color: style.textColor }]}>
+          {tile.value}
+        </Text>
+      )}
+    </Animated.View>
   );
 }
 
-export default function GameScreen({ navigation }) {
-  const [score, setScore] = useState(0);
-  const [lives, setLives] = useState(3);
-  const [timeLeft, setTimeLeft] = useState(GAME_DURATION);
-  const [bubbles, setBubbles] = useState([]);
-  const [popEffects, setPopEffects] = useState([]);
+// ─── Helper to make a tile object ─────────────────────────────────────────────
 
-  const scoreRef = useRef(0);
-  const livesRef = useRef(3);
-  const bubblesRef = useRef([]);
-  const nextIdRef = useRef(0);
-  const gameActiveRef = useRef(true);
-  const lastFrameRef = useRef(null);
-  const rafRef = useRef(null);
-  const spawnTimerRef = useRef(null);
-  const timerRef = useRef(null);
+function makeTile(id, value) {
+  return { id, value };
+}
 
-  // Physics loop — moves bubbles upward each frame
-  const gameLoop = useCallback((timestamp) => {
-    if (!gameActiveRef.current) return;
-    const delta = lastFrameRef.current ? timestamp - lastFrameRef.current : FRAME_MS;
-    lastFrameRef.current = timestamp;
+// ─── Game Screen ──────────────────────────────────────────────────────────────
 
-    bubblesRef.current = bubblesRef.current
-      .filter(b => !b.popped && b.y > -b.radius)
-      .map(b => ({
-        ...b,
-        y: b.y - b.speed * (delta / FRAME_MS),
-        x: b.x + Math.sin(b.wobble) * 0.5,
-        wobble: b.wobble + b.wobbleSpeed,
-      }));
+export default function GameScreen({ route, navigation }) {
+  const continueMode = route.params?.continueMode ?? false;
+  const savedGrid    = route.params?.savedGrid    ?? null;
+  const savedScore   = route.params?.savedScore   ?? 0;
 
-    setBubbles([...bubblesRef.current]);
-    rafRef.current = requestAnimationFrame(gameLoop);
+  // ── State (plain, serializable) ──────────────────────────────────────────
+  const initGrid = useCallback(() => {
+    if (continueMode && savedGrid) return applyContinue(savedGrid);
+    return createEmptyGrid();
   }, []);
 
-  // Countdown timer
-  const startCountdown = useCallback(() => {
-    timerRef.current = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) {
-          endGame();
-          return 0;
-        }
-        return t - 1;
-      });
-    }, 1000);
-  }, []);
+  const [grid,         setGrid]         = useState(initGrid);
+  const [score,        setScore]        = useState(continueMode ? savedScore : 0);
+  const [currentTile,  setCurrentTile]  = useState(() => makeTile('t0', getRandomTileValue()));
+  const [nextTile,     setNextTile]     = useState(() => makeTile('t1', getRandomTileValue()));
+  const [undosLeft,    setUndosLeft]    = useState(3);
+  const [bombReady,    setBombReady]    = useState(false);
+  const [bombMode,     setBombMode]     = useState(false);
+  const [isAnimating,  setIsAnimating]  = useState(false);
+  const [gameEnded,    setGameEnded]    = useState(false);
 
-  // Spawn loop — interval shrinks as score rises
-  const startSpawning = useCallback(() => {
-    const spawn = () => {
-      if (!gameActiveRef.current) return;
-      bubblesRef.current = [...bubblesRef.current, createBubble(nextIdRef.current++)];
-      const interval = getSpawnInterval(scoreRef.current);
-      spawnTimerRef.current = setTimeout(spawn, interval);
-    };
-    spawnTimerRef.current = setTimeout(spawn, 600);
-  }, []);
+  // ── Refs ─────────────────────────────────────────────────────────────────
+  const gridRef        = useRef(grid);
+  const scoreRef       = useRef(continueMode ? savedScore : 0);
+  const tileCounter    = useRef(2);  // t0 and t1 used above
+  const prevGrid       = useRef(null);
+  const prevScore      = useRef(null);
+  const prevCurrent    = useRef(null);
 
-  function endGame() {
-    gameActiveRef.current = false;
-    clearInterval(timerRef.current);
-    clearTimeout(spawnTimerRef.current);
-    cancelAnimationFrame(rafRef.current);
-    navigation.replace('GameOver', { score: scoreRef.current });
-  }
+  // animRefs: { [tileId]: Animated.Value } — kept OUT of React state
+  const animRefs = useRef({});
 
+  const colPressAnims = useRef(
+    Array.from({ length: GRID_COLS }, () => new Animated.Value(1))
+  );
+
+  // ── Initialize animRefs ───────────────────────────────────────────────────
   useEffect(() => {
-    gameActiveRef.current = true;
-    rafRef.current = requestAnimationFrame(gameLoop);
-    startCountdown();
-    startSpawning();
-
-    return () => {
-      gameActiveRef.current = false;
-      clearInterval(timerRef.current);
-      clearTimeout(spawnTimerRef.current);
-      cancelAnimationFrame(rafRef.current);
-    };
+    // Tiles already in grid (continue mode)
+    if (continueMode && savedGrid) {
+      let maxNum = 1;
+      for (const col of savedGrid) {
+        for (const tile of col) {
+          animRefs.current[tile.id] = new Animated.Value(1);
+          const n = parseInt(tile.id.slice(1), 10);
+          if (!isNaN(n) && n > maxNum) maxNum = n;
+        }
+      }
+      tileCounter.current = maxNum + 1;
+    }
+    // Current and next tile
+    animRefs.current['t0'] = new Animated.Value(1);
+    animRefs.current['t1'] = new Animated.Value(1);
   }, []);
 
-  function handlePop(bubble) {
-    if (!gameActiveRef.current) return;
+  // ── Ad hooks (3 separate instances) ──────────────────────────────────────
 
-    // Mark as popped so filter removes it next frame
-    bubblesRef.current = bubblesRef.current.map(b =>
-      b.id === bubble.id ? { ...b, popped: true } : b
-    );
+  const { loaded: undoAdReady, showAd: showUndoAd } = useRewardedAd(
+    useCallback(() => { executeUndo(/* viaaAd= */ true); }, [])
+  );
 
-    if (bubble.isBomb) {
-      if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const newLives = livesRef.current - 1;
-      livesRef.current = newLives;
-      setLives(newLives);
-      if (newLives <= 0) endGame();
+  const { loaded: bombAdReady, showAd: showBombAd } = useRewardedAd(
+    useCallback(() => { setBombReady(true); setBombMode(true); }, [])
+  );
+
+  // (continue ad lives in GameOverScreen)
+
+  // ── Core drop logic ───────────────────────────────────────────────────────
+
+  function handleColumnPress(col) {
+    if (isAnimating || gameEnded) return;
+
+    // Bomb mode: destroy top tile of this column
+    if (bombMode) {
+      const { newGrid, removedId } = bombColumn(gridRef.current, col);
+      if (removedId) delete animRefs.current[removedId];
+      gridRef.current = newGrid;
+      setGrid(newGrid);
+      setBombMode(false);
+      setBombReady(false);
+      haptic('light');
+      return;
+    }
+
+    if (!canDropInCol(gridRef.current, col)) return;
+
+    // Snapshot for undo
+    prevGrid.current    = gridRef.current.map(c => [...c]);
+    prevScore.current   = scoreRef.current;
+    prevCurrent.current = currentTile;
+
+    // Drop & merge
+    const result = dropTile(gridRef.current, col, currentTile.value, currentTile.id);
+    if (!result) return;
+
+    const { newGrid, mergedScore, mergedTileId, consumedIds, specialTile } = result;
+
+    // Clean up animRefs for absorbed tiles
+    for (const id of consumedIds) delete animRefs.current[id];
+
+    // Animate column press indicator
+    const pressAnim = colPressAnims.current[col];
+    Animated.sequence([
+      Animated.timing(pressAnim, { toValue: 0.88, duration: 60, useNativeDriver: true }),
+      Animated.spring(pressAnim,  { toValue: 1,    speed: 50,  useNativeDriver: true }),
+    ]).start();
+
+    // Animate merged tile (scale pulse)
+    if (mergedScore > 0 && mergedTileId && animRefs.current[mergedTileId]) {
+      setIsAnimating(true);
+      haptic('medium');
+      Animated.sequence([
+        Animated.timing(animRefs.current[mergedTileId], { toValue: 1.35, duration: 80, useNativeDriver: true }),
+        Animated.spring(animRefs.current[mergedTileId],  { toValue: 1,    speed: 40, bounciness: 14, useNativeDriver: true }),
+      ]).start(() => setIsAnimating(false));
     } else {
-      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      const newScore = scoreRef.current + bubble.points;
-      scoreRef.current = newScore;
-      setScore(newScore);
-      // Float-up score effect
-      showPopEffect(bubble.x, bubble.y, `+${bubble.points}`);
+      haptic('light');
+    }
+
+    // Handle 2048 formation: extra animation + bonus points + removal
+    let bonusScore = 0;
+    let finalGrid  = newGrid;
+    if (specialTile) {
+      bonusScore = 4096;
+      haptic('success');
+      const anim = animRefs.current[specialTile.id];
+      if (anim) {
+        setIsAnimating(true);
+        Animated.sequence([
+          Animated.timing(anim, { toValue: 1.6,  duration: 150, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0,    duration: 250, useNativeDriver: true }),
+        ]).start(() => {
+          delete animRefs.current[specialTile.id];
+          const clearedGrid = finalGrid.map((c, i) =>
+            i === specialTile.col ? c.filter(t => t.id !== specialTile.id) : c
+          );
+          gridRef.current = clearedGrid;
+          setGrid(clearedGrid);
+          setIsAnimating(false);
+        });
+      }
+    }
+
+    // Advance tile queue
+    const newId = `t${tileCounter.current++}`;
+    animRefs.current[newId] = new Animated.Value(1);
+    const newNext = makeTile(newId, getRandomTileValue());
+
+    const newScore = scoreRef.current + mergedScore + bonusScore;
+    gridRef.current = finalGrid;
+    scoreRef.current = newScore;
+    setGrid(finalGrid);
+    setScore(newScore);
+    setCurrentTile(nextTile);
+    setNextTile(newNext);
+
+    // Check game over (after 2048 removal, give one extra frame)
+    if (isGameOver(finalGrid) && !specialTile) {
+      triggerGameOver(finalGrid, newScore);
     }
   }
 
-  function showPopEffect(x, y, label) {
-    const id = Date.now();
-    setPopEffects(prev => [...prev, { id, x, y, label }]);
+  function triggerGameOver(finalGrid, finalScore) {
+    setGameEnded(true);
+    haptic('error');
+    const bestTileValue = getMaxTile(finalGrid);
     setTimeout(() => {
-      setPopEffects(prev => prev.filter(e => e.id !== id));
-    }, 700);
+      navigation.replace('GameOver', {
+        score:         finalScore,
+        bestTileValue,
+        savedGrid:     finalGrid,   // plain objects — serializable
+        savedScore:    finalScore,
+      });
+    }, 600);
   }
 
-  // Add extra time from rewarded ad (exposed via navigation param)
-  function addBonusTime(seconds) {
-    setTimeLeft(t => t + seconds);
+  // ── Undo ──────────────────────────────────────────────────────────────────
+
+  function handleUndo() {
+    if (undosLeft > 0) {
+      executeUndo(false);
+      setUndosLeft(u => u - 1);
+    } else if (undoAdReady) {
+      showUndoAd();
+    }
   }
 
-  const timerColor = timeLeft > 10 ? '#00d4ff' : '#ff1744';
-  const timerPct = timeLeft / GAME_DURATION;
+  function executeUndo(viaAd = false) {
+    if (!prevGrid.current) return;
+    // Restore animRefs for any tiles that were in prevGrid but not current grid
+    for (const col of prevGrid.current) {
+      for (const tile of col) {
+        if (!animRefs.current[tile.id]) {
+          animRefs.current[tile.id] = new Animated.Value(1);
+        }
+      }
+    }
+    gridRef.current  = prevGrid.current;
+    scoreRef.current = prevScore.current;
+    setGrid(prevGrid.current);
+    setScore(prevScore.current);
+    setCurrentTile(prevCurrent.current);
+    prevGrid.current    = null;
+    prevScore.current   = null;
+    prevCurrent.current = null;
+    haptic('light');
+  }
+
+  // ── Bomb ──────────────────────────────────────────────────────────────────
+
+  function handleBombPress() {
+    if (bombReady) {
+      setBombMode(m => !m);
+    } else if (bombAdReady) {
+      showBombAd();
+    }
+  }
+
+  // ── Haptics ───────────────────────────────────────────────────────────────
+
+  function haptic(type) {
+    if (Platform.OS === 'web') return;
+    switch (type) {
+      case 'light':   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);   break;
+      case 'medium':  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);  break;
+      case 'success': Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); break;
+      case 'error':   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);   break;
+    }
+  }
+
+  // ── Rendering ─────────────────────────────────────────────────────────────
+
+  const ts = TILE_SIZE;
 
   return (
-    <LinearGradient colors={['#0a0a1a', '#0d1b3e']} style={styles.fill}>
+    <LinearGradient colors={['#060610', '#0a0a1a', '#080812']} style={styles.fill}>
+      <StatusBar barStyle="light-content" />
       <SafeAreaView style={styles.safe} edges={['top']}>
+
         {/* HUD */}
         <View style={styles.hud}>
           <View style={styles.hudItem}>
             <Text style={styles.hudLabel}>SCORE</Text>
-            <Text style={styles.hudValue}>{score}</Text>
+            <Text style={styles.hudScore}>{score.toLocaleString()}</Text>
           </View>
 
-          <View style={styles.timerContainer}>
-            <Text style={[styles.timerText, { color: timerColor }]}>{timeLeft}</Text>
-            <View style={styles.timerBar}>
-              <View style={[styles.timerFill, { width: `${timerPct * 100}%`, backgroundColor: timerColor }]} />
-            </View>
+          <View style={styles.hudCenter}>
+            <Text style={styles.gameTitle}>DROP MERGE</Text>
           </View>
 
-          <View style={styles.hudItem}>
-            <Text style={styles.hudLabel}>LIVES</Text>
-            <Text style={styles.hudValue}>{'❤️'.repeat(Math.max(0, lives))}</Text>
-          </View>
+          {/* Undo button */}
+          <TouchableOpacity
+            style={[styles.undoBtn, (!undosLeft && !undoAdReady) && styles.btnDisabled]}
+            onPress={handleUndo}
+            disabled={!prevGrid.current && !undoAdReady}
+          >
+            <Text style={styles.undoBtnIcon}>↩</Text>
+            <Text style={styles.undoBtnLabel}>
+              {undosLeft > 0 ? `×${undosLeft}` : '📺'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Game canvas */}
-        <View style={styles.canvas} pointerEvents="box-none">
-          {bubbles.map(b => (
-            <Bubble key={b.id} bubble={b} onPop={handlePop} />
-          ))}
-          {popEffects.map(e => (
-            <FloatScore key={e.id} x={e.x} y={e.y} label={e.label} />
-          ))}
+        {/* Controls: next tile + bomb */}
+        <View style={styles.controls}>
+          <View style={styles.nextTileBox}>
+            <Text style={styles.nextLabel}>NEXT</Text>
+            <TileCell
+              tile={nextTile}
+              animValue={animRefs.current[nextTile.id]}
+              size={ts * 0.7}
+            />
+          </View>
+
+          <View style={styles.currentTileBox}>
+            <Text style={styles.nextLabel}>NOW</Text>
+            <TileCell
+              tile={currentTile}
+              animValue={animRefs.current[currentTile.id]}
+              size={ts * 0.8}
+            />
+          </View>
+
+          {/* Bomb power-up */}
+          <TouchableOpacity
+            style={[
+              styles.bombBtn,
+              bombMode && styles.bombBtnActive,
+              (!bombReady && !bombAdReady) && styles.btnDisabled,
+            ]}
+            onPress={handleBombPress}
+          >
+            <Text style={styles.bombIcon}>💣</Text>
+            <Text style={styles.bombLabel}>{bombReady ? (bombMode ? 'PICK' : 'USE') : '📺'}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Grid */}
+        <View style={styles.gridWrapper}>
+          <View style={[styles.grid, { width: ts * GRID_COLS }]}>
+            {Array.from({ length: GRID_COLS }, (_, col) => {
+              const full = !canDropInCol(grid, col);
+              const pressScale = colPressAnims.current[col];
+              return (
+                <Animated.View
+                  key={col}
+                  style={[styles.column, { transform: [{ scale: pressScale }] }]}
+                >
+                  <TouchableOpacity
+                    style={styles.columnTouchable}
+                    onPress={() => handleColumnPress(col)}
+                    activeOpacity={0.75}
+                    disabled={gameEnded}
+                  >
+                    {/* Drop indicator at top */}
+                    <View style={[styles.dropIndicator, { width: ts }]}>
+                      {!full && !bombMode && (
+                        <Text style={styles.dropArrow}>▼</Text>
+                      )}
+                      {bombMode && !full && (
+                        <Text style={styles.bombDropIcon}>💣</Text>
+                      )}
+                      {full && (
+                        <Text style={styles.fullMark}>✕</Text>
+                      )}
+                    </View>
+
+                    {/* Tile cells (rendered top → bottom)
+                        grid[col][0]      = bottom tile (shows at screen row GRID_ROWS-1)
+                        grid[col][last]   = top tile    (shows at screen row GRID_ROWS-len)
+                        tile at screen row r = grid[col][GRID_ROWS - 1 - r]          */}
+                    {Array.from({ length: GRID_ROWS }, (_, r) => {
+                      const tile = grid[col][GRID_ROWS - 1 - r] ?? null;
+                      return (
+                        <TileCell
+                          key={r}
+                          tile={tile}
+                          animValue={tile ? animRefs.current[tile.id] : null}
+                          size={ts}
+                        />
+                      );
+                    })}
+                  </TouchableOpacity>
+                </Animated.View>
+              );
+            })}
+          </View>
         </View>
 
         {/* Hint */}
         <View style={styles.hint}>
-          <Text style={styles.hintText}>Tap bubbles • Avoid 💣 bombs</Text>
+          {bombMode
+            ? <Text style={[styles.hintText, { color: '#ff3300' }]}>Tap a column to remove its top tile</Text>
+            : <Text style={styles.hintText}>Tap a column · Match tiles to merge · Reach 2048</Text>
+          }
         </View>
+
       </SafeAreaView>
     </LinearGradient>
-  );
-}
-
-function FloatScore({ x, y, label }) {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }).start();
-  }, []);
-  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [0, -60] });
-  const opacity = anim.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 1, 0] });
-  return (
-    <Animated.Text style={[styles.floatScore, { left: x, top: y, transform: [{ translateY }], opacity }]}>
-      {label}
-    </Animated.Text>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   safe: { flex: 1 },
+
   hud: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 12,
-    backgroundColor: '#ffffff0a', borderBottomWidth: 1, borderBottomColor: '#ffffff15',
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: '#ffffff12',
   },
-  hudItem: { alignItems: 'center', minWidth: 70 },
-  hudLabel: { color: '#666', fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
-  hudValue: { color: '#fff', fontSize: 24, fontWeight: '900' },
-  timerContainer: { alignItems: 'center', flex: 1, marginHorizontal: 16 },
-  timerText: { fontSize: 36, fontWeight: '900' },
-  timerBar: { width: '100%', height: 4, backgroundColor: '#ffffff20', borderRadius: 2, marginTop: 4 },
-  timerFill: { height: 4, borderRadius: 2 },
-  canvas: { flex: 1, position: 'relative' },
-  bubble: { position: 'absolute', alignItems: 'center', justifyContent: 'center', borderWidth: 2 },
-  bubbleIcon: { fontSize: 20, color: '#fff' },
-  floatScore: { position: 'absolute', color: '#ffd600', fontSize: 20, fontWeight: '900' },
-  hint: { alignItems: 'center', paddingVertical: 10 },
-  hintText: { color: '#444', fontSize: 13 },
+  hudItem: { alignItems: 'flex-start', minWidth: 90 },
+  hudLabel: { color: '#555', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  hudScore: { color: '#fff', fontSize: 22, fontWeight: '900' },
+  hudCenter: { flex: 1, alignItems: 'center' },
+  gameTitle: { color: '#7c4dff', fontSize: 13, fontWeight: '900', letterSpacing: 3 },
+
+  undoBtn: {
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#ffffff12', borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 6, minWidth: 54,
+  },
+  undoBtnIcon: { color: '#fff', fontSize: 20 },
+  undoBtnLabel: { color: '#aaa', fontSize: 11, fontWeight: '700' },
+
+  controls: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 8,
+  },
+  nextTileBox: { alignItems: 'center', gap: 4 },
+  currentTileBox: { alignItems: 'center', gap: 4 },
+  nextLabel: { color: '#555', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+
+  bombBtn: {
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#ffffff0a', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 8, minWidth: 58,
+    borderWidth: 1, borderColor: '#ffffff15',
+  },
+  bombBtnActive: {
+    backgroundColor: '#ff330020', borderColor: '#ff3300',
+  },
+  bombIcon: { fontSize: 24 },
+  bombLabel: { color: '#aaa', fontSize: 10, fontWeight: '700', marginTop: 2 },
+
+  btnDisabled: { opacity: 0.3 },
+
+  gridWrapper: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  grid: { flexDirection: 'row' },
+  column: {},
+  columnTouchable: {},
+
+  dropIndicator: {
+    height: 22, alignItems: 'center', justifyContent: 'center',
+  },
+  dropArrow: { color: '#7c4dff', fontSize: 12 },
+  bombDropIcon: { fontSize: 14 },
+  fullMark: { color: '#ff1744', fontSize: 12, fontWeight: '900' },
+
+  cell: {
+    alignItems: 'center', justifyContent: 'center',
+    margin: 1, backgroundColor: '#0a0a16',
+  },
+  tileText: {
+    fontWeight: '900', fontVariant: ['tabular-nums'],
+  },
+
+  hint: { alignItems: 'center', paddingVertical: 8 },
+  hintText: { color: '#333', fontSize: 12 },
 });
