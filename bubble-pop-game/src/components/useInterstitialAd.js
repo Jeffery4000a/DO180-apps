@@ -1,30 +1,21 @@
 import { useEffect, useRef, useCallback } from 'react';
-import {
-  InterstitialAd,
-  AdEventType,
-} from 'react-native-google-mobile-ads';
-import { AD_UNIT_IDS } from '../utils/adConfig';
+import { ADS_AVAILABLE, InterstitialAd, AdEventType, AD_UNIT_IDS } from '../utils/adConfig';
 
-// Show an interstitial every N game overs to avoid over-serving.
-const SHOW_EVERY = 2;
+const SHOW_EVERY = 2; // show an interstitial every N game overs
 
 export default function useInterstitialAd() {
-  const adRef = useRef(null);
-  const loadedRef = useRef(false);
-  const gameOverCount = useRef(0);
+  const adRef       = useRef(null);
+  const loadedRef   = useRef(false);
+  const countRef    = useRef(0);
 
   const loadAd = useCallback(() => {
-    const ad = InterstitialAd.createForAdRequest(AD_UNIT_IDS.interstitial, {
-      requestNonPersonalizedAdsOnly: false,
-    });
-    adRef.current = ad;
+    if (!ADS_AVAILABLE) return () => {};
     loadedRef.current = false;
-
-    const unsubscribe = ad.addAdEventListener(AdEventType.LOADED, () => {
-      loadedRef.current = true;
-    });
+    const ad = InterstitialAd.createForAdRequest(AD_UNIT_IDS.interstitial);
+    adRef.current = ad;
+    const unsub = ad.addAdEventListener(AdEventType.LOADED, () => { loadedRef.current = true; });
     ad.load();
-    return unsubscribe;
+    return unsub;
   }, []);
 
   useEffect(() => {
@@ -32,12 +23,12 @@ export default function useInterstitialAd() {
     return unsub;
   }, [loadAd]);
 
-  // Call this on every game over. It shows an ad every SHOW_EVERY calls.
   const showOnGameOver = useCallback(() => {
-    gameOverCount.current += 1;
-    if (gameOverCount.current % SHOW_EVERY === 0 && loadedRef.current && adRef.current) {
+    countRef.current += 1;
+    if (!ADS_AVAILABLE) return;
+    if (countRef.current % SHOW_EVERY === 0 && loadedRef.current && adRef.current) {
       adRef.current.show();
-      loadAd(); // pre-load next one
+      loadAd();
     }
   }, [loadAd]);
 

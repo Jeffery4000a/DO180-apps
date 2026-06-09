@@ -1,11 +1,14 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
-import { AD_UNIT_IDS } from '../utils/adConfig';
+import { View } from 'react-native';
+import { ADS_AVAILABLE, BannerAd, BannerAdSize, AD_UNIT_IDS } from '../utils/adConfig';
 
 export default function BannerAdView() {
+  if (!ADS_AVAILABLE) {
+    // Expo Go / web: reserve the same space so layout doesn't shift in production
+    return <View style={{ height: 50, backgroundColor: '#0a0a1a' }} />;
+  }
   return (
-    <View style={styles.container}>
+    <View style={{ alignItems: 'center', backgroundColor: '#0a0a1a' }}>
       <BannerAd
         unitId={AD_UNIT_IDS.banner}
         size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
@@ -14,10 +17,3 @@ export default function BannerAdView() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    backgroundColor: '#0a0a1a',
-  },
-});
