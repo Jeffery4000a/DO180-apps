@@ -23,17 +23,30 @@ global/region/country leaderboards.
 
 Ad unit IDs live in `src/utils/adConfig.js`. Test IDs are used automatically in dev builds.
 
-## Leaderboard
+## Leaderboard backend (free)
 
-`src/utils/leaderboard.js` ships in offline mode: scores rank against a seeded
-field of simulated players, with country detection via geo-IP (locale fallback).
-To go live, set `API_URL` in that file and implement:
+A ready-to-deploy Cloudflare Worker + D1 backend lives in `backend/`
+(free plan: 100k requests/day, 5 GB DB). Deploy in ~5 minutes with
+`wrangler deploy` — see `backend/README.md` — then set `API_URL` in
+`src/utils/leaderboard.js`.
 
-```
-GET  {API_URL}/leaderboard?scope=global|country|region&code=SG
-     -> { entries: [{ name, country, score }] }
-POST {API_URL}/scores   body: { name, country, score }
-```
+Caching is layered so scoreboard traffic stays nearly free:
+edge cache 30s (Worker) → in-memory 60s (client) → AsyncStorage
+snapshot for instant paint and offline viewing. Until a backend is
+configured the app runs in offline mode against simulated players.
+
+## Retention & fairness
+
+- **Daily streak** 🔥 — shown on Home; first game of the day earns
+  card tokens (1, or 2 at a 3-day streak, 3 at 7 days)
+- **Comeback gift** — 2 tokens after 2+ days away
+- **Daily reminder** — local notification at 19:00, copy escalates
+  with the streak ("Your 5-day streak is on the line!")
+- **Card Vault** 🎴 — draw tokens unlock 6 tile themes + 6 merge
+  effects across Common/Rare/Epic/Legendary rarities (no duplicates).
+  Extra tokens via rewarded ads (revenue). **Cosmetics only** — no
+  item changes difficulty, scoring, timers, or odds; competition on
+  the leaderboard is identical for every player.
 
 ## Development
 

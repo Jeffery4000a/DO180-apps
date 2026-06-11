@@ -3,6 +3,9 @@ const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
+// The leaderboard backend is a Cloudflare Worker — not part of the app bundle.
+config.resolver.blockList = [/\/backend\/.*/];
+
 const MOCK_PATH = path.resolve(__dirname, 'src/utils/adsMock.js');
 
 // react-native-google-mobile-ads is a native-only module — it cannot run in

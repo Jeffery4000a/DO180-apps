@@ -3,24 +3,31 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // ─────────────────────────────────────────────────────────────────────────────
 // Leaderboard service
 //
-// OFFLINE MODE (default): scores are ranked against a locally-seeded board of
-// simulated players so the screens are fully functional with zero setup.
+// ONLINE MODE: deploy the Cloudflare Worker in ../../backend (free plan,
+// instructions in backend/README.md) and set API_URL to its URL.
 //
-// ONLINE MODE: set API_URL to your backend and implement two endpoints:
-//   GET  {API_URL}/leaderboard?scope=global|country|region&code=SG
-//        -> { entries: [{ name, country, score }] }
-//   POST {API_URL}/scores   body: { name, country, score }
-// Firebase/Supabase both work; the shapes below are all you need.
+// OFFLINE MODE (API_URL = null): scores are ranked against a locally-seeded
+// board of simulated players so the screens work with zero setup.
+//
+// Caching (protects the backend from scoreboard query storms):
+//   L1 — in-memory per scope, fresh for CACHE_TTL_MS: tab switching is free.
+//   L2 — AsyncStorage snapshot: instant paint on app relaunch + offline view.
+//   L3 — the Worker's edge cache (30s) collapses identical queries globally.
 // ─────────────────────────────────────────────────────────────────────────────
-const API_URL = null; // e.g. 'https://your-backend.example.com/api'
+const API_URL = null; // e.g. 'https://dropmerge-leaderboard.YOURNAME.workers.dev'
+
+const CACHE_TTL_MS = 60_000;
+const FETCH_TIMEOUT_MS = 6_000;
 
 const KEYS = {
-  name:  'dm_player_name',
-  geo:   'dm_player_geo',
-  best:  'dm_lb_best_score',
+  name:   'dm_player_name',
+  geo:    'dm_player_geo',
+  best:   'dm_lb_best_score',
+  device: 'dm_device_id',
+  cache:  'dm_lb_cache_',   // + scope
 };
 
-// ── Country → region mapping ────────────────────────────────────────────────
+// ── Country → region mapping (must match backend/src/index.js) ──────────────
 const REGION_OF = {
   US:'North America', CA:'North America', MX:'North America',
   BR:'South America', AR:'South America', CL:'South America', CO:'South America', PE:'South America',
@@ -43,7 +50,14 @@ export function flagEmoji(code) {
   return code.toUpperCase().replace(/./g, c => String.fromCodePoint(127397 + c.charCodeAt(0)));
 }
 
-// ── Player identity ─────────────────────────────────────────────────────────
+function withTimeout(promise, ms = FETCH_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
+  ]);
+}
+
+// ── Identity ─────────────────────────────────────────────────────────────────
 
 export async function getPlayerName() {
   try { return await AsyncStorage.getItem(KEYS.name); } catch { return null; }
@@ -53,8 +67,23 @@ export async function setPlayerName(name) {
   try { await AsyncStorage.setItem(KEYS.name, name.trim().slice(0, 14)); } catch {}
 }
 
-// Detect country via geo-IP, cache forever. Falls back to device locale,
-// then to "Earth" — the game never blocks on this.
+// Stable anonymous device ID — lets the backend keep one best-score row
+// per player without accounts.
+export async function getDeviceId() {
+  try {
+    let id = await AsyncStorage.getItem(KEYS.device);
+    if (!id) {
+      id = 'dm-' + Date.now().toString(36) + '-' +
+        Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 8)).join('');
+      await AsyncStorage.setItem(KEYS.device, id);
+    }
+    return id;
+  } catch {
+    return 'dm-fallback';
+  }
+}
+
+// Detect country via geo-IP, cache forever. Locale fallback, then "Earth".
 export async function detectGeo() {
   try {
     const cached = await AsyncStorage.getItem(KEYS.geo);
@@ -63,10 +92,7 @@ export async function detectGeo() {
 
   let geo = null;
   try {
-    const res = await Promise.race([
-      fetch('https://ipapi.co/json/'),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
-    ]);
+    const res = await withTimeout(fetch('https://ipapi.co/json/'), 4000);
     const data = await res.json();
     if (data.country_code) {
       geo = { code: data.country_code, name: data.country_name || data.country_code };
@@ -88,8 +114,7 @@ export async function detectGeo() {
   return geo;
 }
 
-// ── Simulated global field (offline mode) ───────────────────────────────────
-// A believable spread of competitors so ranks feel real from game one.
+// ── Simulated field (offline mode) ──────────────────────────────────────────
 const SIM_PLAYERS = [
   ['NovaStrike', 'US', 58420], ['TileLord', 'KR', 51230], ['MergeQueen', 'JP', 47880],
   ['Kazuya_88', 'JP', 44310], ['BlitzFox', 'DE', 41950], ['ChainMaster', 'CN', 39400],
@@ -126,22 +151,81 @@ export async function submitScore(score) {
 
   if (API_URL) {
     try {
-      const [name, geo] = await Promise.all([getPlayerName(), detectGeo()]);
-      await fetch(`${API_URL}/scores`, {
+      const [name, geo, deviceId] = await Promise.all([getPlayerName(), detectGeo(), getDeviceId()]);
+      await withTimeout(fetch(`${API_URL}/scores`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name || 'Player', country: geo.code, score }),
-      });
+        body: JSON.stringify({ deviceId, name: name || 'Player', country: geo.code, score }),
+      }));
+      invalidateCache(); // fresh ranks on the next board view
     } catch {}
   }
   return best;
 }
 
+// ── Board cache (L1 memory + L2 AsyncStorage) ───────────────────────────────
+
+const memCache = {}; // scope -> { ts, data }
+
+function invalidateCache() {
+  for (const k of Object.keys(memCache)) delete memCache[k];
+}
+
+async function readPersistedCache(scope) {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.cache + scope);
+    return raw ? JSON.parse(raw) : null; // { ts, data }
+  } catch { return null; }
+}
+
+async function writePersistedCache(scope, data) {
+  try {
+    await AsyncStorage.setItem(KEYS.cache + scope, JSON.stringify({ ts: Date.now(), data }));
+  } catch {}
+}
+
 // ── Leaderboard fetch ───────────────────────────────────────────────────────
 // scope: 'global' | 'country' | 'region'
-// Returns { entries, playerRank } where entries include the player ("you": true).
+// Returns { entries, playerRank, geo } — entries may carry { you: true }.
 
 export async function getLeaderboard(scope) {
+  // L1: fresh memory cache
+  const cached = memCache[scope];
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data;
+
+  const data = API_URL ? await fetchOnline(scope) : await buildSimBoard(scope);
+
+  memCache[scope] = { ts: Date.now(), data };
+  writePersistedCache(scope, data);
+  return data;
+}
+
+async function fetchOnline(scope) {
+  const [geo, deviceId] = await Promise.all([detectGeo(), getDeviceId()]);
+  try {
+    const [boardRes, rankRes] = await Promise.all([
+      withTimeout(fetch(`${API_URL}/leaderboard?scope=${scope}&code=${geo.code}`)),
+      withTimeout(fetch(`${API_URL}/rank?device=${encodeURIComponent(deviceId)}&scope=${scope}&code=${geo.code}`)),
+    ]);
+    const { entries: raw } = await boardRes.json();
+    const { rank } = await rankRes.json();
+
+    const entries = raw.map(e => ({
+      name: e.name,
+      country: e.country,
+      score: e.score,
+      you: e.device_id === deviceId,
+    }));
+    return { entries, playerRank: rank, geo };
+  } catch {
+    // Network down: serve the last persisted snapshot, else the sim board
+    const persisted = await readPersistedCache(scope);
+    if (persisted) return persisted.data;
+    return buildSimBoard(scope);
+  }
+}
+
+async function buildSimBoard(scope) {
   const [name, geo] = await Promise.all([getPlayerName(), detectGeo()]);
   let best = 0;
   try {
@@ -149,18 +233,7 @@ export async function getLeaderboard(scope) {
     best = v ? parseInt(v, 10) : 0;
   } catch {}
 
-  let entries;
-  if (API_URL) {
-    try {
-      const res = await fetch(`${API_URL}/leaderboard?scope=${scope}&code=${geo.code}`);
-      entries = (await res.json()).entries;
-    } catch {
-      entries = simEntries();
-    }
-  } else {
-    entries = simEntries();
-  }
-
+  let entries = simEntries();
   if (scope === 'country') {
     entries = entries.filter(e => e.country === geo.code);
   } else if (scope === 'region') {

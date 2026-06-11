@@ -8,6 +8,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 
 import useRewardedAd from '../components/useRewardedAd';
+import { recordPlayAndGetStreak, consumeComebackGift } from '../utils/storage';
+import { getEquippedPalette, getEquippedEffect, addTokens } from '../utils/cosmetics';
 import {
   GRID_COLS, GRID_ROWS, TILE_SIZE, TILES,
   createEmptyGrid, canDropInCol, isGameOver, getMaxTile,
@@ -43,9 +45,9 @@ function comboColor(combo) {
 
 // ─── Tile Cell ────────────────────────────────────────────────────────────────
 
-function TileCell({ tile, animValue, size }) {
+function TileCell({ tile, animValue, size, palette = TILES }) {
   const isWild = tile?.wild;
-  const style = tile && !isWild ? TILES[tile.value] ?? TILES[2048] : null;
+  const style = tile && !isWild ? palette[tile.value] ?? palette[2048] : null;
   const fontSize = tile ? tileFontSize(isWild ? 2 : tile.value) : 14;
 
   return (
@@ -101,27 +103,29 @@ const BURST_DIRS = Array.from({ length: 7 }, (_, i) => {
   return { dx: Math.cos(a) * 32, dy: Math.sin(a) * 32 };
 });
 
-function Burst({ x, y, color }) {
+function Burst({ x, y, color, fx }) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: 1, duration: 520, useNativeDriver: true }).start();
   }, []);
   const opacity = anim.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 0.8, 0] });
+  const isEmoji = fx?.type === 'emoji';
   return (
     <View style={[styles.burstWrap, { left: x, top: y }]} pointerEvents="none">
-      {BURST_DIRS.map((d, i) => (
-        <Animated.View
-          key={i}
-          style={[styles.burstDot, {
-            backgroundColor: color,
-            opacity,
-            transform: [
-              { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [0, d.dx] }) },
-              { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, d.dy] }) },
-            ],
-          }]}
-        />
-      ))}
+      {BURST_DIRS.map((d, i) => {
+        const move = {
+          opacity,
+          transform: [
+            { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [0, d.dx] }) },
+            { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, d.dy] }) },
+          ],
+        };
+        return isEmoji ? (
+          <Animated.Text key={i} style={[styles.burstEmoji, move]}>{fx.char}</Animated.Text>
+        ) : (
+          <Animated.View key={i} style={[styles.burstDot, { backgroundColor: color }, move]} />
+        );
+      })}
     </View>
   );
 }
@@ -175,6 +179,10 @@ export default function GameScreen({ route, navigation }) {
   const [floats,    setFloats]    = useState([]);   // floating score labels
   const [bursts,    setBursts]    = useState([]);   // particle bursts
 
+  // Equipped cosmetics (visual only — identical gameplay for everyone)
+  const [palette, setPalette] = useState(TILES);
+  const [mergeFx, setMergeFx] = useState({ type: 'dots' });
+
   // ── Refs ──────────────────────────────────────────────────────────────────
   const gridRef     = useRef(grid);
   const scoreRef    = useRef(continueMode ? savedScore : 0);
@@ -206,6 +214,21 @@ export default function GameScreen({ route, navigation }) {
     }
     animRefs.current['t0'] = new Animated.Value(1);
     animRefs.current['t1'] = new Animated.Value(1);
+  }, []);
+
+  // Equipped cosmetics + daily retention rewards (card tokens, never
+  // gameplay advantages — the playing field stays level).
+  useEffect(() => {
+    getEquippedPalette().then(setPalette);
+    getEquippedEffect().then(setMergeFx);
+    if (!continueMode) {
+      recordPlayAndGetStreak().then(({ streak, firstToday }) => {
+        if (firstToday) {
+          addTokens(streak >= 7 ? 3 : streak >= 3 ? 2 : 1);
+        }
+      });
+      consumeComebackGift().then(gift => { if (gift) addTokens(2); });
+    }
   }, []);
 
   // Score counts up toward the real value instead of jumping
@@ -389,7 +412,7 @@ export default function GameScreen({ route, navigation }) {
     const landIdx = newGrid[col].length - 1;
     if (didMerge) {
       const mergedVal = newGrid[col][landIdx]?.value ?? effValue * 2;
-      const glow = (TILES[mergedVal] ?? TILES[2048]).glow;
+      const glow = (palette[mergedVal] ?? palette[2048]).glow;
       addBurst(col, landIdx, glow);
       const label = comboMult > 1 ? `+${gained.toLocaleString()} ×${comboMult}` : `+${gained.toLocaleString()}`;
       addFloat(col, landIdx, label, goldRush ? '#ffd700' : comboColor(newCombo));
@@ -638,12 +661,12 @@ export default function GameScreen({ route, navigation }) {
         <View style={styles.controls}>
           <View style={styles.tilePreview}>
             <Text style={styles.previewLabel}>NEXT</Text>
-            <TileCell tile={nextTile} animValue={animRefs.current[nextTile.id]} size={ts * 0.7} />
+            <TileCell tile={nextTile} animValue={animRefs.current[nextTile.id]} size={ts * 0.7} palette={palette} />
           </View>
 
           <View style={styles.tilePreview}>
             <Text style={styles.previewLabel}>NOW</Text>
-            <TileCell tile={currentTile} animValue={animRefs.current[currentTile.id]} size={ts * 0.85} />
+            <TileCell tile={currentTile} animValue={animRefs.current[currentTile.id]} size={ts * 0.85} palette={palette} />
           </View>
 
           <TouchableOpacity
@@ -701,6 +724,7 @@ export default function GameScreen({ route, navigation }) {
                             tile={tile}
                             animValue={tile ? animRefs.current[tile.id] : null}
                             size={ts}
+                            palette={palette}
                           />
                         );
                       })}
@@ -711,7 +735,7 @@ export default function GameScreen({ route, navigation }) {
 
               {/* FX overlays */}
               {floats.map(f => <FloatLabel key={f.id} {...f} />)}
-              {bursts.map(b => <Burst key={b.id} {...b} />)}
+              {bursts.map(b => <Burst key={b.id} {...b} fx={mergeFx} />)}
 
               {/* Combo badge */}
               {combo >= 2 && (
@@ -844,6 +868,9 @@ const styles = StyleSheet.create({
   burstDot: {
     position: 'absolute', width: 6, height: 6, borderRadius: 3,
     marginLeft: -3, marginTop: -3,
+  },
+  burstEmoji: {
+    position: 'absolute', fontSize: 13, marginLeft: -7, marginTop: -8,
   },
 
   comboBadge: {

@@ -11,6 +11,7 @@ import GameScreen      from './src/screens/GameScreen';
 import GameOverScreen  from './src/screens/GameOverScreen';
 import HowToPlayScreen from './src/screens/HowToPlayScreen';
 import LeaderboardScreen from './src/screens/LeaderboardScreen';
+import CardVaultScreen from './src/screens/CardVaultScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -32,6 +33,7 @@ export default function App() {
           <Stack.Screen name="GameOver"  component={GameOverScreen} />
           <Stack.Screen name="HowToPlay" component={HowToPlayScreen} />
           <Stack.Screen name="Leaderboard" component={LeaderboardScreen} />
+          <Stack.Screen name="CardVault" component={CardVaultScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

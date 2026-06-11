@@ -6,7 +6,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BannerAdView from '../components/BannerAdView';
-import { getHighScore, getBestTile } from '../utils/storage';
+import { getHighScore, getBestTile, getStreakInfo, getDailyHighScore, todayKey } from '../utils/storage';
+import { getTokens } from '../utils/cosmetics';
+import { scheduleStreakReminder } from '../utils/notifications';
 import { TILES, getRandomTileValue } from '../utils/gameLogic';
 
 const { width, height } = Dimensions.get('window');
@@ -64,6 +66,9 @@ function DecoTile({ item }) {
 export default function HomeScreen({ navigation }) {
   const [highScore, setHighScore] = useState(0);
   const [bestTile,  setBestTile]  = useState(0);
+  const [dailyBest, setDailyBest] = useState(0);
+  const [streak,    setStreak]    = useState({ streak: 0, playedToday: false, atRisk: false });
+  const [tokens,    setTokens]    = useState(0);
   const titleAnim   = useRef(new Animated.Value(0)).current;
   const statsAnim   = useRef(new Animated.Value(0)).current;
   const btnAnim     = useRef(new Animated.Value(0)).current;
@@ -79,9 +84,15 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
-    Promise.all([getHighScore(), getBestTile()]).then(([hs, bt]) => {
+    Promise.all([
+      getHighScore(), getBestTile(), getDailyHighScore(todayKey()), getStreakInfo(), getTokens(),
+    ]).then(([hs, bt, db, st, tk]) => {
       setHighScore(hs);
       setBestTile(bt);
+      setDailyBest(db);
+      setStreak(st);
+      setTokens(tk);
+      scheduleStreakReminder(st.streak); // daily 19:00 local reminder
     });
     Animated.stagger(180, [
       Animated.spring(titleAnim, { toValue: 1, useNativeDriver: true, tension: 55 }),
@@ -109,6 +120,15 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.subtitle}>Match · Chain · Conquer</Text>
           </Animated.View>
 
+          {/* Daily streak */}
+          {streak.streak > 0 && (
+            <Animated.View style={[styles.streakChip, { opacity: statsAnim, transform: [{ scale: trophyPulse }] }, streak.atRisk && styles.streakChipRisk]}>
+              <Text style={[styles.streakText, streak.atRisk && { color: '#ff7700' }]}>
+                🔥 {streak.streak}-day streak{streak.atRisk ? ' — play today to keep it!' : ''}
+              </Text>
+            </Animated.View>
+          )}
+
           {/* Stats */}
           {highScore > 0 && (
             <Animated.View style={[styles.statsRow, { opacity: statsAnim }]}>
@@ -116,6 +136,12 @@ export default function HomeScreen({ navigation }) {
                 <Text style={styles.statLabel}>HIGH SCORE</Text>
                 <Text style={styles.statValue}>{highScore.toLocaleString()}</Text>
               </View>
+              {dailyBest > 0 && (
+                <View style={styles.statCard}>
+                  <Text style={styles.statLabel}>TODAY</Text>
+                  <Text style={styles.statValue}>{dailyBest.toLocaleString()}</Text>
+                </View>
+              )}
               {bestTile > 0 && bestTileStyle && (
                 <View style={[styles.statCard, { borderColor: bestTileStyle.glow + '80' }]}>
                   <Text style={styles.statLabel}>BEST TILE</Text>
@@ -150,6 +176,20 @@ export default function HomeScreen({ navigation }) {
             >
               <Animated.Text style={[styles.lbTrophy, { transform: [{ scale: trophyPulse }] }]}>🏆</Animated.Text>
               <Text style={styles.lbText}>Leaderboard</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.vaultBtn}
+              onPress={() => navigation.navigate('CardVault')}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.vaultIcon}>🎴</Text>
+              <Text style={styles.vaultText}>Card Vault</Text>
+              {tokens > 0 && (
+                <View style={styles.tokenBadge}>
+                  <Text style={styles.tokenBadgeText}>🪙 {tokens}</Text>
+                </View>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -207,6 +247,27 @@ const styles = StyleSheet.create({
   },
   lbTrophy: { fontSize: 22 },
   lbText: { color: '#ffd700', fontSize: 17, fontWeight: '800', letterSpacing: 1 },
+  vaultBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#7c4dff15', borderRadius: 50,
+    paddingVertical: 14, paddingHorizontal: 36,
+    borderWidth: 1, borderColor: '#7c4dff55',
+  },
+  vaultIcon: { fontSize: 22 },
+  vaultText: { color: '#b39dff', fontSize: 17, fontWeight: '800', letterSpacing: 1 },
+  tokenBadge: {
+    backgroundColor: '#ffd70020', borderRadius: 50,
+    paddingHorizontal: 10, paddingVertical: 3,
+    borderWidth: 1, borderColor: '#ffd70050',
+  },
+  tokenBadgeText: { color: '#ffd700', fontSize: 12, fontWeight: '900' },
+  streakChip: {
+    backgroundColor: '#ff770015', borderRadius: 50,
+    paddingHorizontal: 22, paddingVertical: 10,
+    borderWidth: 1, borderColor: '#ff770040', marginBottom: 18,
+  },
+  streakChipRisk: { borderColor: '#ff7700', backgroundColor: '#ff770025' },
+  streakText: { color: '#ffb066', fontSize: 14, fontWeight: '800' },
   howBtn: { paddingVertical: 8 },
   howText: { color: '#7c4dff', fontSize: 16, fontWeight: '600' },
 });
