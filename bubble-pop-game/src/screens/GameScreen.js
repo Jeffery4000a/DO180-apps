@@ -9,7 +9,7 @@ import * as Haptics from 'expo-haptics';
 
 import useRewardedAd from '../components/useRewardedAd';
 import { recordPlayAndGetStreak, consumeComebackGift } from '../utils/storage';
-import { getEquippedPalette, getEquippedEffect, addTokens } from '../utils/cosmetics';
+import { getEquippedPalette, getEquippedEffect, getEquippedDesign, addTokens } from '../utils/cosmetics';
 import {
   GRID_COLS, GRID_ROWS, TILE_SIZE, TILES,
   createEmptyGrid, canDropInCol, isGameOver, getMaxTile,
@@ -45,24 +45,26 @@ function comboColor(combo) {
 
 // ─── Tile Cell ────────────────────────────────────────────────────────────────
 
-function TileCell({ tile, animValue, size, palette = TILES }) {
+function TileCell({ tile, animValue, size, palette = TILES, design }) {
   const isWild = tile?.wild;
   const style = tile && !isWild ? palette[tile.value] ?? palette[2048] : null;
   const fontSize = tile ? tileFontSize(isWild ? 2 : tile.value) : 14;
+  const glowBoost = design?.glowBoost ?? 1;
 
   return (
     <Animated.View
       style={[
         styles.cell,
-        { width: size, height: size, borderRadius: 6 },
+        { width: size, height: size, borderRadius: design?.radius ?? 6 },
         style && {
           backgroundColor: style.bg,
           borderColor: style.glow,
-          borderWidth: 1.5,
+          borderWidth: design?.borderWidth ?? 1.5,
+          borderStyle: design?.borderStyle ?? 'solid',
           shadowColor: style.glow,
-          shadowOpacity: 0.6,
-          shadowRadius: 4,
-          elevation: 4,
+          shadowOpacity: Math.min(1, 0.5 * glowBoost),
+          shadowRadius: 4 * glowBoost,
+          elevation: Math.round(4 * glowBoost),
         },
         isWild && styles.wildCell,
         animValue && { transform: [{ scale: animValue }] },
@@ -72,6 +74,14 @@ function TileCell({ tile, animValue, size, palette = TILES }) {
         isWild
           ? <Text style={[styles.wildStar, { fontSize: size * 0.5 }]}>★</Text>
           : <Text style={[styles.tileText, { fontSize, color: style.textColor }]}>{tile.value}</Text>
+      )}
+      {tile && !isWild && design?.ornament && (
+        <Text style={[styles.cellOrnament, { color: style.glow, fontSize: size * 0.2 }]}>
+          {design.ornament}
+        </Text>
+      )}
+      {tile && !isWild && design?.emblem && (
+        <Text style={[styles.cellEmblem, { fontSize: size * 0.22 }]}>{design.emblem}</Text>
       )}
     </Animated.View>
   );
@@ -180,8 +190,9 @@ export default function GameScreen({ route, navigation }) {
   const [bursts,    setBursts]    = useState([]);   // particle bursts
 
   // Equipped cosmetics (visual only — identical gameplay for everyone)
-  const [palette, setPalette] = useState(TILES);
-  const [mergeFx, setMergeFx] = useState({ type: 'dots' });
+  const [palette, setPalette]   = useState(TILES);
+  const [mergeFx, setMergeFx]   = useState({ type: 'dots' });
+  const [tileDesign, setTileDesign] = useState(null);
 
   // ── Refs ──────────────────────────────────────────────────────────────────
   const gridRef     = useRef(grid);
@@ -221,6 +232,7 @@ export default function GameScreen({ route, navigation }) {
   useEffect(() => {
     getEquippedPalette().then(setPalette);
     getEquippedEffect().then(setMergeFx);
+    getEquippedDesign().then(setTileDesign);
     if (!continueMode) {
       recordPlayAndGetStreak().then(({ streak, firstToday }) => {
         if (firstToday) {
@@ -661,12 +673,12 @@ export default function GameScreen({ route, navigation }) {
         <View style={styles.controls}>
           <View style={styles.tilePreview}>
             <Text style={styles.previewLabel}>NEXT</Text>
-            <TileCell tile={nextTile} animValue={animRefs.current[nextTile.id]} size={ts * 0.7} palette={palette} />
+            <TileCell tile={nextTile} animValue={animRefs.current[nextTile.id]} size={ts * 0.7} palette={palette} design={tileDesign} />
           </View>
 
           <View style={styles.tilePreview}>
             <Text style={styles.previewLabel}>NOW</Text>
-            <TileCell tile={currentTile} animValue={animRefs.current[currentTile.id]} size={ts * 0.85} palette={palette} />
+            <TileCell tile={currentTile} animValue={animRefs.current[currentTile.id]} size={ts * 0.85} palette={palette} design={tileDesign} />
           </View>
 
           <TouchableOpacity
@@ -725,6 +737,7 @@ export default function GameScreen({ route, navigation }) {
                             animValue={tile ? animRefs.current[tile.id] : null}
                             size={ts}
                             palette={palette}
+                            design={tileDesign}
                           />
                         );
                       })}
@@ -851,6 +864,8 @@ const styles = StyleSheet.create({
     margin: 1, backgroundColor: '#0a0a16',
   },
   tileText: { fontWeight: '900', fontVariant: ['tabular-nums'] },
+  cellOrnament: { position: 'absolute', bottom: 1, right: 3, opacity: 0.85 },
+  cellEmblem: { position: 'absolute', top: -2, left: 0 },
 
   wildCell: {
     backgroundColor: '#2a1f00',

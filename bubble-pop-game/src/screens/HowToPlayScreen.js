@@ -12,7 +12,7 @@ const RULES = [
   { icon: '🔥',  title: 'Combo Multiplier',   desc: 'Merge on consecutive drops to build a combo — every merge in a row multiplies your score, up to ×5. Miss a merge and it resets.' },
   { icon: '🌟',  title: 'GOLD RUSH',          desc: 'Chain merges fill the Gold Rush meter. When it\'s full you get 5 golden wildcard tiles (★) that merge with ANY tile — and all scores are ×3!' },
   { icon: '🏆',  title: 'Global Leaderboard', desc: 'Your best score competes worldwide, in your region, and in your country. Climb all three boards!' },
-  { icon: '🎴',  title: 'Card Vault',         desc: 'Earn tokens by playing daily (streaks pay more) or watching ads, then draw cards to unlock tile themes and merge effects. Pure cosmetics — zero gameplay advantage.' },
+  { icon: '🎴',  title: 'Card Vault',         desc: 'Earn tokens by playing daily (streaks pay more) or watching ads, then draw from 140 collectibles: 30 color themes, 100 ranked tile designs, and 10 merge effects. The higher the rank — Common to Mythic — the more beautiful the card. Pure cosmetics, zero gameplay advantage.' },
   { icon: '↩️',  title: 'Undo Last Drop',     desc: 'Changed your mind? Undo reverses your last move. You get 3 free per game. Watch an ad for unlimited undos.' },
   { icon: '💣',  title: 'Bomb Power-Up',      desc: 'Watch an ad to earn a Bomb. Activate it, then tap any column to destroy its top tile.' },
   { icon: '📺',  title: 'Continue Playing',   desc: 'When the board fills up, watch a video ad to clear the top of each column and keep your score.' },

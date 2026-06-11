@@ -12,6 +12,15 @@ import {
   getOwned, getEquipped, equip, previewPalette,
 } from '../utils/cosmetics';
 
+const KIND_TABS = [
+  { key: 'all',    label: 'All' },
+  { key: 'theme',  label: '🎨 Themes' },
+  { key: 'design', label: '🀄 Tiles' },
+  { key: 'effect', label: '💥 FX' },
+];
+
+const KIND_LABELS = { theme: 'Tile Theme', design: 'Tile Design', effect: 'Merge Effect' };
+
 // Mini 3-tile preview strip for theme cards
 function ThemeStrip({ themeId }) {
   const p = previewPalette(themeId);
@@ -26,6 +35,52 @@ function ThemeStrip({ themeId }) {
   );
 }
 
+// Sample tile rendered with a design's shape/border/ornament — Mythic shimmers
+function DesignPreview({ item }) {
+  const d = item.design;
+  const glow = RARITY[item.rarity].color;
+  const shimmer = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!d.shimmer) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, { toValue: 1, duration: 700, useNativeDriver: false }),
+        Animated.timing(shimmer, { toValue: 0, duration: 700, useNativeDriver: false }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        styles.designPreview,
+        {
+          borderRadius: d.radius,
+          borderWidth: d.borderWidth,
+          borderStyle: d.borderStyle,
+          borderColor: glow,
+          backgroundColor: '#10102a',
+          shadowColor: glow,
+          shadowOpacity: d.shimmer
+            ? shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] })
+            : Math.min(1, 0.4 * d.glowBoost),
+          shadowRadius: 6 * d.glowBoost,
+          elevation: Math.round(4 * d.glowBoost),
+        },
+      ]}
+    >
+      <Text style={[styles.designPreviewText, { color: glow }]}>64</Text>
+      {d.ornament && (
+        <Text style={[styles.designOrnament, { color: glow }]}>{d.ornament}</Text>
+      )}
+      {d.emblem && <Text style={styles.designEmblem}>{d.emblem}</Text>}
+    </Animated.View>
+  );
+}
+
 export default function CardVaultScreen({ navigation }) {
   const [tokens, setTokens]     = useState(0);
   const [owned, setOwned]       = useState([]);
@@ -33,6 +88,7 @@ export default function CardVaultScreen({ navigation }) {
   const [revealed, setRevealed] = useState(null);  // item just drawn
   const [drawing, setDrawing]   = useState(false);
   const [message, setMessage]   = useState(null);
+  const [kindFilter, setKindFilter] = useState('all');
 
   const flipAnim   = useRef(new Animated.Value(0)).current; // 0 = back, 1 = face
   const glowAnim   = useRef(new Animated.Value(0)).current;
@@ -151,11 +207,12 @@ export default function CardVaultScreen({ navigation }) {
                   <Text style={[styles.cardRarity, { color: rarity.color }]}>{rarity.label.toUpperCase()}</Text>
                   <Text style={styles.cardIcon}>{revealed.icon}</Text>
                   <Text style={styles.cardName}>{revealed.name}</Text>
-                  <Text style={styles.cardKind}>{revealed.kind === 'theme' ? 'Tile Theme' : 'Merge Effect'}</Text>
+                  <Text style={styles.cardKind}>{KIND_LABELS[revealed.kind]}</Text>
                   {revealed.kind === 'theme' && <ThemeStrip themeId={revealed.id} />}
+                  {revealed.kind === 'design' && <DesignPreview item={revealed} />}
                   <TouchableOpacity style={[styles.equipBtn, { borderColor: rarity.color }]} onPress={() => handleEquip(revealed.id)}>
                     <Text style={[styles.equipBtnText, { color: rarity.color }]}>
-                      {(equipped.theme === revealed.id || equipped.effect === revealed.id) ? '✓ EQUIPPED' : 'EQUIP NOW'}
+                      {Object.values(equipped).includes(revealed.id) ? '✓ EQUIPPED' : 'EQUIP NOW'}
                     </Text>
                   </TouchableOpacity>
                 </>
@@ -190,10 +247,26 @@ export default function CardVaultScreen({ navigation }) {
 
           {/* Collection */}
           <Text style={styles.sectionTitle}>COLLECTION  ·  {owned.length}/{CATALOG.length}</Text>
+
+          {/* Kind filter */}
+          <View style={styles.kindTabs}>
+            {KIND_TABS.map(kt => (
+              <TouchableOpacity
+                key={kt.key}
+                style={[styles.kindTab, kindFilter === kt.key && styles.kindTabActive]}
+                onPress={() => setKindFilter(kt.key)}
+              >
+                <Text style={[styles.kindTabText, kindFilter === kt.key && { color: '#fff' }]}>
+                  {kt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <View style={styles.grid}>
-            {CATALOG.map(item => {
+            {CATALOG.filter(item => kindFilter === 'all' || item.kind === kindFilter).map(item => {
               const isOwned = owned.includes(item.id);
-              const isEquipped = equipped.theme === item.id || equipped.effect === item.id;
+              const isEquipped = Object.values(equipped).includes(item.id);
               const r = RARITY[item.rarity];
               return (
                 <TouchableOpacity
@@ -287,6 +360,21 @@ const styles = StyleSheet.create({
     color: '#555', fontSize: 12, fontWeight: '800', letterSpacing: 2,
     alignSelf: 'flex-start', marginBottom: 12,
   },
+  kindTabs: { flexDirection: 'row', gap: 8, width: '100%', marginBottom: 14 },
+  kindTab: {
+    flex: 1, alignItems: 'center', paddingVertical: 8,
+    borderRadius: 10, backgroundColor: '#ffffff07',
+    borderWidth: 1, borderColor: '#ffffff10',
+  },
+  kindTabActive: { backgroundColor: '#7c4dff25', borderColor: '#7c4dff' },
+  kindTabText: { color: '#777', fontSize: 12, fontWeight: '700' },
+  designPreview: {
+    width: 56, height: 56, alignItems: 'center', justifyContent: 'center',
+    marginBottom: 10,
+  },
+  designPreviewText: { fontSize: 18, fontWeight: '900' },
+  designOrnament: { position: 'absolute', bottom: 2, right: 4, fontSize: 11 },
+  designEmblem: { position: 'absolute', top: -7, left: -7, fontSize: 14 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, width: '100%' },
   gridCard: {
     width: '30.5%', aspectRatio: 0.82,
