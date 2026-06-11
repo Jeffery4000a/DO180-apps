@@ -8,6 +8,8 @@ const RULES = [
   { icon: '🔗',  title: 'Merge to Score',     desc: 'When two identical tiles stack on each other, they merge into one tile worth double the value.' },
   { icon: '⚡',  title: 'Chain Reactions',    desc: 'A single drop can trigger cascading merges: 2+2→4, then 4+4→8, and so on. These score huge points.' },
   { icon: '⭐',  title: 'Reach 2048',         desc: 'Forming a 2048 tile earns 4096 bonus points and clears that tile — giving you breathing room.' },
+  { icon: '🔥',  title: 'Combo Multiplier',   desc: 'Merge on consecutive drops to build a combo — every merge in a row multiplies your score, up to ×5. Miss a merge and it resets.' },
+  { icon: '🌟',  title: 'GOLD RUSH',          desc: 'Chain merges fill the Gold Rush meter. When it\'s full you get 5 golden wildcard tiles (★) that merge with ANY tile — and all scores are ×3!' },
   { icon: '↩️',  title: 'Undo Last Drop',     desc: 'Changed your mind? Undo reverses your last move. You get 3 free per game. Watch an ad for unlimited undos.' },
   { icon: '💣',  title: 'Bomb Power-Up',      desc: 'Watch an ad to earn a Bomb. Activate it, then tap any column to destroy its top tile.' },
   { icon: '📺',  title: 'Continue Playing',   desc: 'When the board fills up, watch a video ad to clear the top of each column and keep your score.' },
@@ -15,6 +17,8 @@ const RULES = [
 ];
 
 const TIPS = [
+  'Save your wildcards for the biggest tile on the board — a ★ on a 512 makes a 1024 instantly.',
+  'Protect your combo: a drop with no merge resets the multiplier to ×1.',
   'Keep the tallest column in the center — easier to set up chain merges.',
   'Never fill one column all the way — you need flexibility to undo.',
   'Small tiles (2, 4) pile up fast. Try to merge them before they reach the top.',
