@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Animated, Platform, StatusBar,
+  Animated, Platform, StatusBar, AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +23,19 @@ const METER_MAX      = 100;
 const COMBO_COLORS   = ['#00d4ff', '#00d4ff', '#7c4dff', '#ff7700', '#ffd700', '#ffd700'];
 
 const INDICATOR_H = 22; // matches styles.dropIndicator height
+
+// ── Tension timer tuning ─────────────────────────────────────────────────────
+const TIMER_START = 30;   // seconds at game start
+const TIMER_MAX   = 60;   // cap — merges can bank up to this much
+const TICK_MS     = 100;  // drain resolution
+// Drain accelerates gently as the score grows (up to 2x at ~12k points)
+function drainRate(score) {
+  return Math.min(2, 1 + score / 12000);
+}
+// Seconds earned per merge: deeper chains pay more, 2048 pays a jackpot
+function timeReward(chainLen, formed2048) {
+  return chainLen * 1.5 + (formed2048 ? 5 : 0);
+}
 
 function comboColor(combo) {
   return COMBO_COLORS[Math.min(combo, COMBO_COLORS.length - 1)];
@@ -145,6 +158,15 @@ export default function GameScreen({ route, navigation }) {
   const [bombMode,    setBombMode]    = useState(false);
   const [gameEnded,   setGameEnded]   = useState(false);
 
+  // Tension timer
+  const [timeLeft,  setTimeLeft]  = useState(TIMER_START);
+  const [timeGain,  setTimeGain]  = useState(null);   // "+3s" popup near the timer
+  const timeRef      = useRef(TIMER_START);
+  const endedRef     = useRef(false);
+  const appActiveRef = useRef(true);
+  const timerPulse   = useRef(new Animated.Value(1)).current;
+  const gainAnim     = useRef(new Animated.Value(0)).current;
+
   // Juice state
   const [combo,     setCombo]     = useState(0);
   const [meter,     setMeter]     = useState(0);
@@ -194,6 +216,39 @@ export default function GameScreen({ route, navigation }) {
     return () => clearTimeout(t);
   }, [score, shownScore]);
 
+  // Tension timer: drains continuously, pauses while the app is backgrounded
+  // (so full-screen ads don't burn the player's clock).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', s => {
+      appActiveRef.current = s === 'active';
+    });
+    const tick = setInterval(() => {
+      if (endedRef.current || !appActiveRef.current) return;
+      timeRef.current -= (TICK_MS / 1000) * drainRate(scoreRef.current);
+      if (timeRef.current <= 0) {
+        timeRef.current = 0;
+        setTimeLeft(0);
+        triggerGameOver(gridRef.current, scoreRef.current, 'time');
+        return;
+      }
+      setTimeLeft(Math.ceil(timeRef.current));
+    }, TICK_MS);
+    return () => { clearInterval(tick); sub.remove(); };
+  }, []);
+
+  // Heartbeat pulse on the timer when under 8 seconds
+  useEffect(() => {
+    if (timeLeft > 8 || timeLeft <= 0) { timerPulse.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(timerPulse, { toValue: 1.25, duration: 280, useNativeDriver: true }),
+        Animated.timing(timerPulse, { toValue: 1,    duration: 280, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [timeLeft <= 8]);
+
   // Gold-glow pulse loop while gold rush is active
   useEffect(() => {
     if (!goldRush) { rushPulse.setValue(0); return; }
@@ -214,6 +269,18 @@ export default function GameScreen({ route, navigation }) {
   const { loaded: bombAdReady, showAd: showBombAd } = useRewardedAd(
     useCallback(() => { setBombReady(true); setBombMode(true); }, [])
   );
+
+  // ── Timer helpers ─────────────────────────────────────────────────────────
+
+  function addTime(seconds) {
+    if (seconds <= 0) return;
+    timeRef.current = Math.min(TIMER_MAX, timeRef.current + seconds);
+    setTimeLeft(Math.ceil(timeRef.current));
+    setTimeGain(`+${seconds % 1 === 0 ? seconds : seconds.toFixed(1)}s`);
+    gainAnim.setValue(0);
+    Animated.timing(gainAnim, { toValue: 1, duration: 800, useNativeDriver: true })
+      .start(() => setTimeGain(null));
+  }
 
   // ── FX helpers ────────────────────────────────────────────────────────────
 
@@ -315,6 +382,9 @@ export default function GameScreen({ route, navigation }) {
       setMeter(meterRef.current);
     }
 
+    // Merges buy back time — the survival loop
+    if (didMerge) addTime(timeReward(chainLen, !!specialTile));
+
     // ── FX ───────────────────────────────────────────────────────────────
     const landIdx = newGrid[col].length - 1;
     if (didMerge) {
@@ -398,7 +468,9 @@ export default function GameScreen({ route, navigation }) {
     }
   }
 
-  function triggerGameOver(finalGrid, finalScore) {
+  function triggerGameOver(finalGrid, finalScore, reason = 'board') {
+    if (endedRef.current) return;
+    endedRef.current = true;
     setGameEnded(true);
     haptic('error');
     const bestTileValue = getMaxTile(finalGrid);
@@ -408,6 +480,7 @@ export default function GameScreen({ route, navigation }) {
         bestTileValue,
         savedGrid: finalGrid,
         savedScore: finalScore,
+        reason,
       });
     }, 600);
   }
@@ -468,7 +541,8 @@ export default function GameScreen({ route, navigation }) {
 
   const ts = TILE_SIZE;
   const fullCols = grid.filter(c => c.length >= GRID_ROWS).length;
-  const danger = !goldRush && fullCols >= 3;
+  const danger = !goldRush && (fullCols >= 3 || timeLeft <= 8);
+  const timerColor = timeLeft > 15 ? '#00d4ff' : timeLeft > 8 ? '#ff7700' : '#ff1744';
 
   const gridBorderColor = goldRush ? '#ffd700' : danger ? '#ff1744' : '#ffffff15';
   const bgColors = goldRush
@@ -498,6 +572,37 @@ export default function GameScreen({ route, navigation }) {
               : danger
                 ? <Text style={styles.dangerTitle}>⚠ DANGER</Text>
                 : <Text style={styles.gameTitle}>DROP MERGE</Text>}
+            <Animated.Text
+              style={[
+                styles.timerText,
+                { color: timerColor, transform: [{ scale: timerPulse }] },
+              ]}
+            >
+              {timeLeft}
+            </Animated.Text>
+            <View style={styles.timerTrack}>
+              <View
+                style={[
+                  styles.timerFill,
+                  { width: `${(timeRef.current / TIMER_MAX) * 100}%`, backgroundColor: timerColor },
+                ]}
+              />
+            </View>
+            {timeGain && (
+              <Animated.Text
+                style={[
+                  styles.timeGainText,
+                  {
+                    opacity: gainAnim.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 0] }),
+                    transform: [{
+                      translateY: gainAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -18] }),
+                    }],
+                  },
+                ]}
+              >
+                ⏱ {timeGain}
+              </Animated.Text>
+            )}
           </View>
 
           <TouchableOpacity
@@ -650,9 +755,19 @@ const styles = StyleSheet.create({
   hudLabel: { color: '#555', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
   hudScore: { color: '#fff', fontSize: 22, fontWeight: '900', fontVariant: ['tabular-nums'] },
   hudCenter: { flex: 1, alignItems: 'center' },
-  gameTitle: { color: '#7c4dff', fontSize: 13, fontWeight: '900', letterSpacing: 3 },
-  rushTitle: { color: '#ffd700', fontSize: 14, fontWeight: '900', letterSpacing: 2 },
-  dangerTitle: { color: '#ff1744', fontSize: 14, fontWeight: '900', letterSpacing: 2 },
+  gameTitle: { color: '#7c4dff', fontSize: 10, fontWeight: '900', letterSpacing: 3 },
+  rushTitle: { color: '#ffd700', fontSize: 10, fontWeight: '900', letterSpacing: 2 },
+  dangerTitle: { color: '#ff1744', fontSize: 10, fontWeight: '900', letterSpacing: 2 },
+  timerText: { fontSize: 30, fontWeight: '900', fontVariant: ['tabular-nums'], lineHeight: 34 },
+  timerTrack: {
+    width: 90, height: 4, borderRadius: 2,
+    backgroundColor: '#ffffff15', overflow: 'hidden', marginTop: 2,
+  },
+  timerFill: { height: 4, borderRadius: 2 },
+  timeGainText: {
+    position: 'absolute', top: 10, right: -14,
+    color: '#00ff88', fontSize: 13, fontWeight: '900',
+  },
 
   undoBtn: {
     alignItems: 'center', justifyContent: 'center',

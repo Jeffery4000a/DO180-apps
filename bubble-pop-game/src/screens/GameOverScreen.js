@@ -10,15 +10,17 @@ import useInterstitialAd from '../components/useInterstitialAd';
 import useRewardedAd from '../components/useRewardedAd';
 import { TILES, applyContinue, GRID_ROWS } from '../utils/gameLogic';
 import { saveHighScore, saveBestTile, incrementTotalGames, todayKey, saveDailyHighScore } from '../utils/storage';
+import { submitScore, getLeaderboard, flagEmoji } from '../utils/leaderboard';
 
 const CONTINUE_SECONDS = 12; // countdown to hide the Continue offer
 
 export default function GameOverScreen({ route, navigation }) {
-  const { score, bestTileValue, savedGrid, savedScore } = route.params;
+  const { score, bestTileValue, savedGrid, savedScore, reason } = route.params;
   const [isNewRecord, setIsNewRecord]     = useState(false);
   const [isNewBestTile, setIsNewBestTile] = useState(false);
   const [countdown, setCountdown]         = useState(CONTINUE_SECONDS);
   const [showContinue, setShowContinue]   = useState(true);
+  const [ranks, setRanks]                 = useState(null);
 
   const cardAnim  = useRef(new Animated.Value(0)).current;
   const scoreAnim = useRef(new Animated.Value(0)).current;
@@ -45,6 +47,16 @@ export default function GameOverScreen({ route, navigation }) {
       incrementTotalGames(),
       saveDailyHighScore(dk, score),
     ]);
+
+    // Submit to the leaderboard, then reveal the player's ranks
+    submitScore(score)
+      .then(() => Promise.all([getLeaderboard('global'), getLeaderboard('country')]))
+      .then(([g, c]) => setRanks({
+        global: g.playerRank,
+        country: c.playerRank,
+        geo: c.geo,
+      }))
+      .catch(() => {});
 
     // Show interstitial (throttled every 2 game overs by the hook)
     showOnGameOver();
@@ -77,8 +89,10 @@ export default function GameOverScreen({ route, navigation }) {
 
           {/* Main card */}
           <Animated.View style={[styles.card, { opacity: cardAnim, transform: [{ scale: cardAnim }] }]}>
-            <Text style={styles.goEmoji}>{isNewRecord ? '🏆' : '💀'}</Text>
-            <Text style={styles.goTitle}>{isNewRecord ? 'NEW RECORD!' : 'GAME OVER'}</Text>
+            <Text style={styles.goEmoji}>{isNewRecord ? '🏆' : reason === 'time' ? '⏱' : '💀'}</Text>
+            <Text style={styles.goTitle}>
+              {isNewRecord ? 'NEW RECORD!' : reason === 'time' ? "TIME'S UP!" : 'GAME OVER'}
+            </Text>
 
             <Animated.View style={{ opacity: scoreAnim, transform: [{ scale: scoreAnim }] }}>
               <Text style={styles.scoreLabel}>SCORE</Text>
@@ -102,6 +116,21 @@ export default function GameOverScreen({ route, navigation }) {
               </View>
               {isNewBestTile && <Text style={styles.newBadge}>NEW!</Text>}
             </View>
+
+            {/* World + country rank */}
+            {ranks && (
+              <TouchableOpacity
+                style={styles.statBox}
+                onPress={() => navigation.navigate('Leaderboard')}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.statLabel}>YOUR RANK</Text>
+                <Text style={styles.rankLine}>🌍 #{ranks.global ?? '—'}</Text>
+                <Text style={styles.rankLine}>
+                  {flagEmoji(ranks.geo?.code)} #{ranks.country ?? '—'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </Animated.View>
 
           {/* Continue offer (timed, disappears after countdown) */}
@@ -135,6 +164,14 @@ export default function GameOverScreen({ route, navigation }) {
               >
                 <Text style={styles.playAgainText}>PLAY AGAIN</Text>
               </LinearGradient>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.lbBtn}
+              onPress={() => navigation.navigate('Leaderboard')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.lbText}>🏆  View Leaderboard</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -174,7 +211,7 @@ const styles = StyleSheet.create({
   },
   newRecordText: { color: '#ffd700', fontWeight: '700', fontSize: 14 },
 
-  statsRow: { flexDirection: 'row', marginBottom: 16 },
+  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   statBox: {
     alignItems: 'center', backgroundColor: '#ffffff08',
     borderRadius: 14, padding: 14, borderWidth: 1, minWidth: 100,
@@ -186,6 +223,9 @@ const styles = StyleSheet.create({
   },
   miniTileText: { fontWeight: '900', fontSize: 16 },
   newBadge: { color: '#ffd700', fontSize: 11, fontWeight: '800', marginTop: 6 },
+  rankLine: { color: '#fff', fontSize: 16, fontWeight: '800', marginTop: 3 },
+  lbBtn: { alignItems: 'center', paddingVertical: 10 },
+  lbText: { color: '#ffd700', fontSize: 16, fontWeight: '700' },
 
   continueBox: {
     backgroundColor: '#ffd70012', borderRadius: 16, padding: 18,

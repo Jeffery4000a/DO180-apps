@@ -64,9 +64,19 @@ function DecoTile({ item }) {
 export default function HomeScreen({ navigation }) {
   const [highScore, setHighScore] = useState(0);
   const [bestTile,  setBestTile]  = useState(0);
-  const titleAnim = useRef(new Animated.Value(0)).current;
-  const statsAnim = useRef(new Animated.Value(0)).current;
-  const btnAnim   = useRef(new Animated.Value(0)).current;
+  const titleAnim   = useRef(new Animated.Value(0)).current;
+  const statsAnim   = useRef(new Animated.Value(0)).current;
+  const btnAnim     = useRef(new Animated.Value(0)).current;
+  const trophyPulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(trophyPulse, { toValue: 1.18, duration: 700, useNativeDriver: true }),
+        Animated.timing(trophyPulse, { toValue: 1,    duration: 700, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
 
   useEffect(() => {
     Promise.all([getHighScore(), getBestTile()]).then(([hs, bt]) => {
@@ -134,6 +144,15 @@ export default function HomeScreen({ navigation }) {
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={styles.lbBtn}
+              onPress={() => navigation.navigate('Leaderboard')}
+              activeOpacity={0.85}
+            >
+              <Animated.Text style={[styles.lbTrophy, { transform: [{ scale: trophyPulse }] }]}>🏆</Animated.Text>
+              <Text style={styles.lbText}>Leaderboard</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={styles.howBtn}
               onPress={() => navigation.navigate('HowToPlay')}
               activeOpacity={0.8}
@@ -180,6 +199,14 @@ const styles = StyleSheet.create({
   playBtn: { borderRadius: 50, overflow: 'hidden', width: '80%' },
   playGradient: { paddingVertical: 20, alignItems: 'center', borderRadius: 50 },
   playText: { color: '#fff', fontSize: 28, fontWeight: '900', letterSpacing: 5 },
+  lbBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#ffd70012', borderRadius: 50,
+    paddingVertical: 14, paddingHorizontal: 36,
+    borderWidth: 1, borderColor: '#ffd70050',
+  },
+  lbTrophy: { fontSize: 22 },
+  lbText: { color: '#ffd700', fontSize: 17, fontWeight: '800', letterSpacing: 1 },
   howBtn: { paddingVertical: 8 },
   howText: { color: '#7c4dff', fontSize: 16, fontWeight: '600' },
 });

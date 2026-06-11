@@ -1,134 +1,68 @@
-# Bubble Pop! — Ad-Monetized Mobile Game
+# Drop Merge — Ad-Monetized Puzzle Game
 
-A hyper-casual React Native/Expo game for **iOS and Android**, built to maximize ad revenue through Google AdMob with banner, interstitial, and rewarded ad placements.
+A cross-platform (iOS + Android) React Native/Expo merge puzzle built for retention
+and ad revenue: tension timer, combo multipliers, a Gold Rush bonus stage, and
+global/region/country leaderboards.
 
-## Game Overview
+## Gameplay
 
-- **Genre**: Hyper-casual tap game
-- **Session length**: ~30–60 seconds (ideal for high ad frequency)
-- **Core loop**: Pop colored bubbles → beat your high score → watch rewarded ad for bonus time → repeat
+- Tap a column to drop the current tile; equal tiles merge and double (2 → 2048)
+- **Timer**: drains constantly (faster as your score grows); every merge buys time back
+- **Combo**: consecutive merge-drops multiply scores up to ×5
+- **Gold Rush**: chain merges fill a meter → 5 wildcard ★ tiles + all scores ×3
+- **2048**: forming it pays a 4096 bonus and clears the tile
+- Game over when the board fills or the timer hits zero
 
-## Bubble Types
+## Ad placements (Google AdMob)
 
-| Bubble | Points | Rarity |
-|--------|--------|--------|
-| ⭐ Gold   | 10 pts | 7%  |
-| 🔵 Small  |  5 pts | 35% |
-| 🟣 Medium |  3 pts | 35% |
-| 🟠 Large  |  1 pt  | 20% |
-| 💣 Bomb   | −life  | 3%  |
+| Format | Trigger |
+|---|---|
+| Banner | Home + Game Over screens |
+| Interstitial | Every 2nd game over |
+| Rewarded ×3 | Undo (after 3 free) · Bomb power-up · Continue after game over |
 
-## Ad Monetization Strategy
+Ad unit IDs live in `src/utils/adConfig.js`. Test IDs are used automatically in dev builds.
 
-### Ad Placements
+## Leaderboard
 
-| Format        | Placement                  | Typical eCPM |
-|---------------|----------------------------|--------------|
-| **Banner**    | Home screen + Game Over    | $0.50–$2     |
-| **Interstitial** | Every 2nd game over     | $1–$5        |
-| **Rewarded**  | "+15s" offer after game over | $5–$15     |
+`src/utils/leaderboard.js` ships in offline mode: scores rank against a seeded
+field of simulated players, with country detection via geo-IP (locale fallback).
+To go live, set `API_URL` in that file and implement:
 
-### How to Maximize Revenue
-
-1. **Replace test IDs** in `src/utils/adConfig.js` with your real AdMob unit IDs.
-2. **Add AdMob Mediation** — connect ironSource, Meta Audience Network, and AppLovin in the AdMob dashboard. Mediation fills more impressions and runs auctions to maximize eCPM.
-3. **GDPR Consent** — use Google's UMP SDK (User Messaging Platform) for EU users. Required to serve personalized ads in Europe.
-4. **A/B test ad frequency** — interstitials every 2 game overs is a good start; test every 3 vs every 1.
-5. **Rewarded ads are your #1 earner** — the "+15 seconds" hook gives players a real reason to watch.
-6. **App Store Optimization** — more installs = more DAUs = more revenue. Focus on:
-   - Screenshot showing gameplay + score
-   - Short, punchy description
-   - 5-star review prompts after a high score
-
-### Revenue Estimate
-
-With 1,000 daily active users and good mediation:
-- Banner: ~$2–5/day
-- Interstitials: ~$10–25/day  
-- Rewarded: ~$30–80/day
-- **Total: ~$42–110/day** from 1K DAU
-
-Scale to 100K DAU and you're looking at $4,000–11,000/day.
-
-## Setup & Development
-
-### Prerequisites
-
-- Node.js 18+
-- [Expo CLI](https://docs.expo.dev/get-started/installation/)
-- [EAS CLI](https://docs.expo.dev/eas/) for building
-
-```bash
-npm install -g expo-cli eas-cli
+```
+GET  {API_URL}/leaderboard?scope=global|country|region&code=SG
+     -> { entries: [{ name, country, score }] }
+POST {API_URL}/scores   body: { name, country, score }
 ```
 
-### Install & Run
+## Development
 
 ```bash
-cd bubble-pop-game
 npm install
-expo start
+npx expo start --clear     # Expo Go: full gameplay, ads mocked
 ```
 
-Scan the QR code with **Expo Go** on your phone to see the game instantly.
+AdMob is native-only; in Expo Go a Metro resolver alias (`metro.config.js`)
+swaps it for `src/utils/adsMock.js`. For a native build with real ads:
 
-> **Note**: AdMob ads require a native build (not Expo Go). Use `expo run:android` or `expo run:ios` for real ad testing.
+1. Comment out the `resolveRequest` block in `metro.config.js`
+2. Restore the `react-native-google-mobile-ads` plugin (app IDs) in `app.json`
+   and add `google-services.json` / `GoogleService-Info.plist`
+3. `npx expo run:android` or `eas build --platform android`
 
-### Building for Production
-
-```bash
-# Configure EAS (first time only)
-eas build:configure
-
-# Android (APK for testing, AAB for Play Store)
-eas build --platform android --profile production
-
-# iOS (requires Apple Developer account)
-eas build --platform ios --profile production
-```
-
-### Publishing
-
-1. **Android**: Upload the `.aab` to [Google Play Console](https://play.google.com/console)
-2. **iOS**: Use `eas submit --platform ios` or upload `.ipa` via Xcode/Transporter
-
-## Project Structure
+## Project structure
 
 ```
-bubble-pop-game/
-├── App.js                        # Entry — initializes AdMob + navigation
-├── app.json                      # Expo config (replace App IDs here)
-├── eas.json                      # EAS Build profiles
-├── src/
-│   ├── screens/
-│   │   ├── HomeScreen.js         # Title screen with banner ad
-│   │   ├── GameScreen.js         # Core gameplay (physics loop)
-│   │   ├── GameOverScreen.js     # Score + interstitial + rewarded offer
-│   │   └── HowToPlayScreen.js    # Rules
-│   ├── components/
-│   │   ├── BannerAdView.js       # Reusable banner ad component
-│   │   ├── useInterstitialAd.js  # Hook — throttled interstitial
-│   │   └── useRewardedAd.js      # Hook — rewarded ad with callback
-│   └── utils/
-│       ├── adConfig.js           # All ad unit IDs in one place
-│       ├── gameLogic.js          # Bubble spawning + physics helpers
-│       └── storage.js            # AsyncStorage for high score
+App.js                          navigation + AdMob init
+src/screens/HomeScreen.js       title, stats, leaderboard entry
+src/screens/GameScreen.js       core game: grid, timer, combo, Gold Rush
+src/screens/GameOverScreen.js   interstitial, Continue offer, rank reveal
+src/screens/LeaderboardScreen.js podium + animated global/region/country boards
+src/screens/HowToPlayScreen.js  rules
+src/components/                 BannerAdView, useInterstitialAd, useRewardedAd
+src/utils/gameLogic.js          merge engine (pure JS, unit-testable)
+src/utils/leaderboard.js        score service (offline sim / REST-ready)
+src/utils/storage.js            AsyncStorage wrappers
+src/utils/adConfig.js           ad unit IDs
+src/utils/adsMock.js            no-op AdMob for Expo Go
 ```
-
-## Ad ID Configuration
-
-Open `src/utils/adConfig.js` and replace the placeholder IDs:
-
-```js
-const IDS = {
-  banner:       { android: 'ca-app-pub-XXX/YYY', ios: 'ca-app-pub-XXX/ZZZ' },
-  interstitial: { android: 'ca-app-pub-XXX/YYY', ios: 'ca-app-pub-XXX/ZZZ' },
-  rewarded:     { android: 'ca-app-pub-XXX/YYY', ios: 'ca-app-pub-XXX/ZZZ' },
-};
-```
-
-Also update the App IDs in `app.json` under `plugins > react-native-google-mobile-ads`.
-
-## License
-
-MIT
