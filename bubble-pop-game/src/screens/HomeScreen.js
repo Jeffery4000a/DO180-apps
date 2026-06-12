@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Animated, Dimensions, StatusBar,
+  Animated, Dimensions, StatusBar, Easing,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -63,6 +63,39 @@ function DecoTile({ item }) {
   );
 }
 
+// Aurora ambient orb component
+function AuroraOrb({ color1, color2, style, floatAnim }) {
+  const animStyle = floatAnim ? [style, { transform: [{ translateY: floatAnim }] }] : [style];
+  return (
+    <Animated.View style={[styles.auroraOrb, ...animStyle]}>
+      <LinearGradient
+        colors={[color1, color2, 'transparent']}
+        style={styles.auroraOrbInner}
+        start={{ x: 0.5, y: 0.5 }}
+        end={{ x: 1, y: 1 }}
+      />
+    </Animated.View>
+  );
+}
+
+// Gradient border button component
+function GradientBorderButton({ gradientColors, onPress, children, style }) {
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={style}>
+      <LinearGradient
+        colors={gradientColors}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.gradBorderOuter}
+      >
+        <View style={styles.gradBorderInner}>
+          {children}
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+}
+
 export default function HomeScreen({ navigation }) {
   const [highScore, setHighScore] = useState(0);
   const [bestTile,  setBestTile]  = useState(0);
@@ -74,12 +107,47 @@ export default function HomeScreen({ navigation }) {
   const btnAnim     = useRef(new Animated.Value(0)).current;
   const trophyPulse = useRef(new Animated.Value(1)).current;
 
+  // Aurora float animations
+  const floatAnim1 = useRef(new Animated.Value(0)).current;
+  const floatAnim2 = useRef(new Animated.Value(0)).current;
+
+  // Shimmer animation for play button
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
         Animated.timing(trophyPulse, { toValue: 1.18, duration: 700, useNativeDriver: true }),
         Animated.timing(trophyPulse, { toValue: 1,    duration: 700, useNativeDriver: true }),
       ])
+    ).start();
+  }, []);
+
+  // Aurora float loops
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim1, { toValue: -18, duration: 8000, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+        Animated.timing(floatAnim1, { toValue: 0,   duration: 8000, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+      ])
+    ).start();
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim2, { toValue: 14, duration: 10000, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+        Animated.timing(floatAnim2, { toValue: 0,  duration: 10000, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
+      ])
+    ).start();
+  }, []);
+
+  // Shimmer loop for play button
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(shimmerAnim, {
+        toValue: 1,
+        duration: 2500,
+        useNativeDriver: true,
+        easing: Easing.linear,
+      })
     ).start();
   }, []);
 
@@ -103,9 +171,35 @@ export default function HomeScreen({ navigation }) {
 
   const bestTileStyle = bestTile ? TILES[bestTile] ?? TILES[2048] : null;
 
+  const shimmerTranslateX = shimmerAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-200, 400],
+  });
+
   return (
-    <LinearGradient colors={['#060610', '#0a0a1a', '#08081a']} style={styles.fill}>
+    <LinearGradient colors={['#020209', '#06030f', '#020914']} style={styles.fill}>
       <StatusBar barStyle="light-content" />
+
+      {/* Aurora ambient orbs */}
+      <AuroraOrb
+        color1="rgba(139,92,246,0.22)"
+        color2="rgba(139,92,246,0.05)"
+        style={styles.auroraTopLeft}
+        floatAnim={floatAnim1}
+      />
+      <AuroraOrb
+        color1="rgba(34,211,238,0.18)"
+        color2="rgba(34,211,238,0.03)"
+        style={styles.auroraMidRight}
+        floatAnim={floatAnim2}
+      />
+      <AuroraOrb
+        color1="rgba(232,121,249,0.20)"
+        color2="rgba(232,121,249,0.04)"
+        style={styles.auroraBottomCenter}
+        floatAnim={null}
+      />
+
       <SafeAreaView style={styles.safe}>
 
         {/* Decorative falling tiles */}
@@ -117,33 +211,71 @@ export default function HomeScreen({ navigation }) {
           <Animated.View style={[styles.titleBlock, { opacity: titleAnim, transform: [{ scale: titleAnim }] }]}>
             <Text style={styles.title}>DROP</Text>
             <Text style={styles.titleAccent}>MERGE</Text>
-            <Text style={styles.subtitle}>Match · Chain · Conquer</Text>
+            {/* Gradient divider */}
+            <LinearGradient
+              colors={['transparent', '#8B5CF6', '#22d3ee', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.titleDivider}
+            />
+            <Text style={styles.subtitle}>Stack · Chain · Conquer</Text>
           </Animated.View>
 
           {/* Daily streak */}
           {streak.streak > 0 && (
-            <Animated.View style={[styles.streakChip, { opacity: statsAnim, transform: [{ scale: trophyPulse }] }, streak.atRisk && styles.streakChipRisk]}>
-              <Text style={[styles.streakText, streak.atRisk && { color: '#ff7700' }]}>
-                🔥 {streak.streak}-day streak{streak.atRisk ? ' — play today to keep it!' : ''}
-              </Text>
+            <Animated.View style={{ opacity: statsAnim }}>
+              {streak.atRisk ? (
+                <LinearGradient
+                  colors={['rgba(232,121,249,0.15)', 'rgba(232,121,249,0.05)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[styles.streakChip, styles.streakChipGlow, { borderColor: '#e879f9' }]}
+                >
+                  <Animated.Text style={[styles.streakText, { color: '#e879f9', transform: [{ scale: trophyPulse }] }]}>
+                    🔥 {streak.streak}-day streak — play today to keep it!
+                  </Animated.Text>
+                </LinearGradient>
+              ) : (
+                <LinearGradient
+                  colors={['rgba(251,191,36,0.12)', 'rgba(251,191,36,0.04)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[styles.streakChip, { borderColor: '#FBBF2460' }]}
+                >
+                  <Text style={[styles.streakText, { color: '#FBBF24' }]}>
+                    🔥 {streak.streak}-day streak
+                  </Text>
+                </LinearGradient>
+              )}
             </Animated.View>
           )}
 
           {/* Stats */}
           {highScore > 0 && (
             <Animated.View style={[styles.statsRow, { opacity: statsAnim }]}>
-              <View style={styles.statCard}>
+              <View style={[styles.statCard, { overflow: 'hidden' }]}>
+                <View style={[styles.statCardAccent, { backgroundColor: '#8B5CF6' }]} />
                 <Text style={styles.statLabel}>HIGH SCORE</Text>
-                <Text style={styles.statValue}>{highScore.toLocaleString()}</Text>
+                <Text style={[styles.statValue, {
+                  textShadowColor: 'rgba(139,92,246,0.7)',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 10,
+                }]}>{highScore.toLocaleString()}</Text>
               </View>
               {dailyBest > 0 && (
-                <View style={styles.statCard}>
+                <View style={[styles.statCard, { overflow: 'hidden' }]}>
+                  <View style={[styles.statCardAccent, { backgroundColor: '#22d3ee' }]} />
                   <Text style={styles.statLabel}>TODAY</Text>
-                  <Text style={styles.statValue}>{dailyBest.toLocaleString()}</Text>
+                  <Text style={[styles.statValue, {
+                    textShadowColor: 'rgba(34,211,238,0.7)',
+                    textShadowOffset: { width: 0, height: 0 },
+                    textShadowRadius: 10,
+                  }]}>{dailyBest.toLocaleString()}</Text>
                 </View>
               )}
               {bestTile > 0 && bestTileStyle && (
-                <View style={[styles.statCard, { borderColor: bestTileStyle.glow + '80' }]}>
+                <View style={[styles.statCard, { overflow: 'hidden' }]}>
+                  <View style={[styles.statCardAccent, { backgroundColor: '#FBBF24' }]} />
                   <Text style={styles.statLabel}>BEST TILE</Text>
                   <View style={[styles.miniTile, { backgroundColor: bestTileStyle.bg, borderColor: bestTileStyle.glow }]}>
                     <Text style={[styles.miniTileText, { color: bestTileStyle.textColor }]}>{bestTile}</Text>
@@ -155,42 +287,58 @@ export default function HomeScreen({ navigation }) {
 
           {/* Buttons */}
           <Animated.View style={[styles.buttons, { opacity: btnAnim, transform: [{ scale: btnAnim }] }]}>
+            {/* Shimmer Play Button */}
             <TouchableOpacity
               style={styles.playBtn}
               onPress={() => navigation.navigate('Game')}
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={['#7c4dff', '#00d4ff']}
+                colors={['#4C1D95', '#7C3AED', '#0891B2']}
                 style={styles.playGradient}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
               >
                 <Text style={styles.playText}>PLAY</Text>
+                {/* Shimmer overlay */}
+                <Animated.View
+                  style={[
+                    styles.shimmerOverlay,
+                    { transform: [{ translateX: shimmerTranslateX }, { skewX: '-25deg' }] },
+                  ]}
+                  pointerEvents="none"
+                />
               </LinearGradient>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.lbBtn}
-              onPress={() => navigation.navigate('Leaderboard')}
-              activeOpacity={0.85}
-            >
-              <Animated.Text style={[styles.lbTrophy, { transform: [{ scale: trophyPulse }] }]}>🏆</Animated.Text>
-              <Text style={styles.lbText}>Leaderboard</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.vaultBtn}
-              onPress={() => navigation.navigate('CardVault')}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.vaultIcon}>🎴</Text>
-              <Text style={styles.vaultText}>Card Vault</Text>
-              {tokens > 0 && (
-                <View style={styles.tokenBadge}>
-                  <Text style={styles.tokenBadgeText}>🪙 {tokens}</Text>
+            {/* Secondary buttons row */}
+            <View style={styles.secondaryRow}>
+              <GradientBorderButton
+                gradientColors={['#FBBF24', '#F59E0B', '#D97706']}
+                onPress={() => navigation.navigate('Leaderboard')}
+                style={styles.secondaryBtnWrapper}
+              >
+                <View style={styles.secondaryBtnContent}>
+                  <Animated.Text style={[styles.lbTrophy, { transform: [{ scale: trophyPulse }] }]}>🏆</Animated.Text>
+                  <Text style={styles.lbText}>Leaderboard</Text>
                 </View>
-              )}
-            </TouchableOpacity>
+              </GradientBorderButton>
+
+              <GradientBorderButton
+                gradientColors={['#8B5CF6', '#7C3AED', '#6D28D9']}
+                onPress={() => navigation.navigate('CardVault')}
+                style={styles.secondaryBtnWrapper}
+              >
+                <View style={styles.secondaryBtnContent}>
+                  <Text style={styles.vaultIcon}>🎴</Text>
+                  <Text style={styles.vaultText}>Card Vault</Text>
+                  {tokens > 0 && (
+                    <View style={styles.tokenBadge}>
+                      <Text style={styles.tokenBadgeText}>🪙 {tokens}</Text>
+                    </View>
+                  )}
+                </View>
+              </GradientBorderButton>
+            </View>
 
             <TouchableOpacity
               style={styles.howBtn}
@@ -214,21 +362,50 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
 
+  // Aurora orbs
+  auroraOrb: { position: 'absolute', borderRadius: 999 },
+  auroraOrbInner: { width: '100%', height: '100%', borderRadius: 999 },
+  auroraTopLeft: { width: 300, height: 300, top: -60, left: -80 },
+  auroraMidRight: { width: 260, height: 260, top: height * 0.3, right: -80 },
+  auroraBottomCenter: { width: 280, height: 280, bottom: 60, left: width * 0.5 - 140 },
+
   decoTile: { position: 'absolute', borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   decoTileText: { fontWeight: '900' },
 
-  titleBlock: { alignItems: 'center', marginBottom: 36 },
-  title: { fontSize: 64, fontWeight: '900', color: '#fff', letterSpacing: 4, lineHeight: 68 },
-  titleAccent: { fontSize: 64, fontWeight: '900', color: '#7c4dff', letterSpacing: 4, lineHeight: 68 },
-  subtitle: { fontSize: 16, color: '#555', marginTop: 10, letterSpacing: 2 },
-
-  statsRow: { flexDirection: 'row', gap: 12, marginBottom: 36 },
-  statCard: {
-    alignItems: 'center', backgroundColor: '#ffffff09',
-    borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#ffffff15', minWidth: 100,
+  titleBlock: { alignItems: 'center', marginBottom: 28 },
+  title: {
+    fontSize: 68, fontWeight: '900', color: '#fff', letterSpacing: 6, lineHeight: 72,
+    textShadowColor: 'rgba(139,92,246,0.8)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 20,
   },
-  statLabel: { color: '#555', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 6 },
-  statValue: { color: '#fff', fontSize: 28, fontWeight: '900' },
+  titleAccent: {
+    fontSize: 68, fontWeight: '900', color: '#8B5CF6', letterSpacing: 6, lineHeight: 72,
+    textShadowColor: 'rgba(139,92,246,0.9)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 24,
+  },
+  titleDivider: { width: 220, height: 1.5, marginVertical: 14 },
+  subtitle: { fontSize: 13, color: '#64748B', marginTop: 2, letterSpacing: 4, fontWeight: '600' },
+
+  streakChip: {
+    borderRadius: 50,
+    paddingHorizontal: 22, paddingVertical: 10,
+    borderWidth: 1, marginBottom: 18,
+  },
+  streakChipGlow: { borderWidth: 1.5 },
+  streakText: { fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+
+  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 32 },
+  statCard: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16, paddingTop: 0, paddingBottom: 14, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)', minWidth: 95,
+  },
+  statCardAccent: { height: 3, width: '100%', marginBottom: 12 },
+  statLabel: { color: '#64748B', fontSize: 9, fontWeight: '700', letterSpacing: 1.5, marginBottom: 6 },
+  statValue: { color: '#fff', fontSize: 26, fontWeight: '900' },
   miniTile: {
     width: 48, height: 48, borderRadius: 8, borderWidth: 2,
     alignItems: 'center', justifyContent: 'center',
@@ -236,38 +413,44 @@ const styles = StyleSheet.create({
   miniTileText: { fontWeight: '900', fontSize: 15 },
 
   buttons: { width: '100%', alignItems: 'center', gap: 14 },
-  playBtn: { borderRadius: 50, overflow: 'hidden', width: '80%' },
-  playGradient: { paddingVertical: 20, alignItems: 'center', borderRadius: 50 },
-  playText: { color: '#fff', fontSize: 28, fontWeight: '900', letterSpacing: 5 },
-  lbBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#ffd70012', borderRadius: 50,
-    paddingVertical: 14, paddingHorizontal: 36,
-    borderWidth: 1, borderColor: '#ffd70050',
+  playBtn: { borderRadius: 50, overflow: 'hidden', width: '90%' },
+  playGradient: { paddingVertical: 20, alignItems: 'center', borderRadius: 50, overflow: 'hidden' },
+  playText: { color: '#fff', fontSize: 28, fontWeight: '900', letterSpacing: 6 },
+  shimmerOverlay: {
+    position: 'absolute',
+    top: 0, bottom: 0,
+    width: 60,
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  lbTrophy: { fontSize: 22 },
-  lbText: { color: '#ffd700', fontSize: 17, fontWeight: '800', letterSpacing: 1 },
-  vaultBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#7c4dff15', borderRadius: 50,
-    paddingVertical: 14, paddingHorizontal: 36,
-    borderWidth: 1, borderColor: '#7c4dff55',
+
+  secondaryRow: { flexDirection: 'row', gap: 12, width: '90%' },
+  secondaryBtnWrapper: { flex: 1 },
+  gradBorderOuter: { borderRadius: 50, padding: 1.5 },
+  gradBorderInner: {
+    backgroundColor: '#07021a',
+    borderRadius: 50,
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  vaultIcon: { fontSize: 22 },
-  vaultText: { color: '#b39dff', fontSize: 17, fontWeight: '800', letterSpacing: 1 },
+  secondaryBtnContent: { flexDirection: 'row', alignItems: 'center', gap: 7, justifyContent: 'center' },
+
+  lbTrophy: { fontSize: 18 },
+  lbText: { color: '#FBBF24', fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
+  vaultIcon: { fontSize: 18 },
+  vaultText: { color: '#8B5CF6', fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
   tokenBadge: {
-    backgroundColor: '#ffd70020', borderRadius: 50,
-    paddingHorizontal: 10, paddingVertical: 3,
-    borderWidth: 1, borderColor: '#ffd70050',
+    backgroundColor: 'rgba(251,191,36,0.15)', borderRadius: 50,
+    paddingHorizontal: 8, paddingVertical: 2,
+    borderWidth: 1, borderColor: 'rgba(251,191,36,0.4)',
   },
-  tokenBadgeText: { color: '#ffd700', fontSize: 12, fontWeight: '900' },
-  streakChip: {
-    backgroundColor: '#ff770015', borderRadius: 50,
-    paddingHorizontal: 22, paddingVertical: 10,
-    borderWidth: 1, borderColor: '#ff770040', marginBottom: 18,
-  },
-  streakChipRisk: { borderColor: '#ff7700', backgroundColor: '#ff770025' },
-  streakText: { color: '#ffb066', fontSize: 14, fontWeight: '800' },
+  tokenBadgeText: { color: '#FBBF24', fontSize: 11, fontWeight: '900' },
+
   howBtn: { paddingVertical: 8 },
-  howText: { color: '#7c4dff', fontSize: 16, fontWeight: '600' },
+  howText: {
+    color: '#64748B', fontSize: 14, fontWeight: '600',
+    textDecorationLine: 'underline',
+    textDecorationColor: '#64748B',
+  },
 });

@@ -149,6 +149,25 @@ function makeWildTile(id) {
   return { id, value: 0, wild: true };
 }
 
+// ─── Gradient border control button ──────────────────────────────────────────
+
+function GradBorderBtn({ gradientColors, onPress, disabled, style, children }) {
+  return (
+    <TouchableOpacity onPress={onPress} disabled={disabled} activeOpacity={0.8} style={[disabled && styles.btnDisabled, style]}>
+      <LinearGradient
+        colors={disabled ? ['#333', '#222'] : gradientColors}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.gradBtnOuter}
+      >
+        <View style={styles.gradBtnInner}>
+          {children}
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+}
+
 // ─── Game Screen ──────────────────────────────────────────────────────────────
 
 export default function GameScreen({ route, navigation }) {
@@ -577,15 +596,18 @@ export default function GameScreen({ route, navigation }) {
   const ts = TILE_SIZE;
   const fullCols = grid.filter(c => c.length >= GRID_ROWS).length;
   const danger = !goldRush && (fullCols >= 3 || timeLeft <= 8);
-  const timerColor = timeLeft > 15 ? '#00d4ff' : timeLeft > 8 ? '#ff7700' : '#ff1744';
+  const timerColor = timeLeft > 15 ? '#22d3ee' : timeLeft > 8 ? '#ff7700' : '#ff1744';
 
-  const gridBorderColor = goldRush ? '#ffd700' : danger ? '#ff1744' : '#ffffff15';
+  const gridBorderColor = goldRush ? '#FBBF24' : danger ? '#ff1744' : 'rgba(255,255,255,0.08)';
   const bgColors = goldRush
     ? ['#181000', '#221a00', '#100a00']
-    : ['#060610', '#0a0a1a', '#080812'];
+    : ['#020209', '#06030f', '#020914'];
 
   const shakeX = shakeAnim.interpolate({ inputRange: [-1, 1], outputRange: [-8, 8] });
   const rushGlowOpacity = rushPulse.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.5] });
+
+  const undoDisabled = !prevGrid.current && !undoAdReady;
+  const bombDisabled = !bombReady && !bombAdReady;
 
   return (
     <LinearGradient colors={bgColors} style={styles.fill}>
@@ -596,14 +618,22 @@ export default function GameScreen({ route, navigation }) {
         <View style={styles.hud}>
           <View style={styles.hudItem}>
             <Text style={styles.hudLabel}>SCORE</Text>
-            <Text style={[styles.hudScore, goldRush && { color: '#ffd700' }]}>
+            <Text style={[
+              styles.hudScore,
+              goldRush && {
+                color: '#FBBF24',
+                textShadowColor: 'rgba(251,191,36,0.8)',
+                textShadowOffset: { width: 0, height: 0 },
+                textShadowRadius: 10,
+              },
+            ]}>
               {shownScore.toLocaleString()}
             </Text>
           </View>
 
           <View style={styles.hudCenter}>
             {goldRush
-              ? <Text style={styles.rushTitle}>★ GOLD RUSH ★</Text>
+              ? <Text style={styles.rushTitle}>⚡ GOLD RUSH</Text>
               : danger
                 ? <Text style={styles.dangerTitle}>⚠ DANGER</Text>
                 : <Text style={styles.gameTitle}>DROP MERGE</Text>}
@@ -611,6 +641,11 @@ export default function GameScreen({ route, navigation }) {
               style={[
                 styles.timerText,
                 { color: timerColor, transform: [{ scale: timerPulse }] },
+                timeLeft <= 8 && {
+                  textShadowColor: 'rgba(255,23,68,0.8)',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 12,
+                },
               ]}
             >
               {timeLeft}
@@ -619,7 +654,13 @@ export default function GameScreen({ route, navigation }) {
               <View
                 style={[
                   styles.timerFill,
-                  { width: `${(timeRef.current / TIMER_MAX) * 100}%`, backgroundColor: timerColor },
+                  {
+                    width: `${(timeRef.current / TIMER_MAX) * 100}%`,
+                    backgroundColor: timerColor,
+                    shadowColor: timerColor,
+                    shadowOpacity: 0.8,
+                    shadowRadius: 4,
+                  },
                 ]}
               />
             </View>
@@ -640,31 +681,35 @@ export default function GameScreen({ route, navigation }) {
             )}
           </View>
 
-          <TouchableOpacity
-            style={[styles.undoBtn, (!prevGrid.current && !undoAdReady) && styles.btnDisabled]}
+          <GradBorderBtn
+            gradientColors={['#8B5CF6', '#6D28D9']}
             onPress={handleUndo}
-            disabled={!prevGrid.current && !undoAdReady}
+            disabled={undoDisabled}
           >
             <Text style={styles.undoBtnIcon}>↩</Text>
             <Text style={styles.undoBtnLabel}>{undosLeft > 0 ? `×${undosLeft}` : '📺'}</Text>
-          </TouchableOpacity>
+          </GradBorderBtn>
         </View>
 
         {/* Gold Rush meter */}
         <View style={styles.meterRow}>
-          <Text style={styles.meterIcon}>{goldRush ? '★' : '🔥'}</Text>
+          <Text style={styles.meterIcon}>{goldRush ? '⚡' : '🔥'}</Text>
           <View style={styles.meterTrack}>
             {goldRush ? (
-              <View style={[styles.meterFill, { width: `${(wildLeft / WILD_COUNT) * 100}%`, backgroundColor: '#ffd700' }]} />
+              <LinearGradient
+                colors={['#FBBF24', '#F59E0B']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={[styles.meterFill, { width: `${(wildLeft / WILD_COUNT) * 100}%` }]}
+              />
             ) : (
               <LinearGradient
-                colors={['#ff7700', '#ffd700']}
+                colors={['#ff4500', '#ff7700', '#FBBF24']}
                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                 style={[styles.meterFill, { width: `${meter}%` }]}
               />
             )}
           </View>
-          <Text style={[styles.meterLabel, goldRush && { color: '#ffd700' }]}>
+          <Text style={[styles.meterLabel, goldRush && { color: '#FBBF24' }]}>
             {goldRush ? `${wildLeft} WILD` : 'GOLD RUSH'}
           </Text>
         </View>
@@ -681,17 +726,15 @@ export default function GameScreen({ route, navigation }) {
             <TileCell tile={currentTile} animValue={animRefs.current[currentTile.id]} size={ts * 0.85} palette={palette} design={tileDesign} />
           </View>
 
-          <TouchableOpacity
-            style={[
-              styles.bombBtn,
-              bombMode && styles.bombBtnActive,
-              (!bombReady && !bombAdReady) && styles.btnDisabled,
-            ]}
+          <GradBorderBtn
+            gradientColors={bombMode ? ['#ff3300', '#ff6600'] : ['#e879f9', '#8B5CF6']}
             onPress={handleBombPress}
+            disabled={bombDisabled}
+            style={bombMode && styles.bombBtnActive}
           >
             <Text style={styles.bombIcon}>💣</Text>
             <Text style={styles.bombLabel}>{bombReady ? (bombMode ? 'PICK' : 'USE') : '📺'}</Text>
-          </TouchableOpacity>
+          </GradBorderBtn>
         </View>
 
         {/* Grid */}
@@ -725,7 +768,7 @@ export default function GameScreen({ route, navigation }) {
                           ? <Text style={styles.fullMark}>✕</Text>
                           : bombMode
                             ? <Text style={styles.bombDropIcon}>💣</Text>
-                            : <Text style={[styles.dropArrow, goldRush && { color: '#ffd700' }]}>▼</Text>}
+                            : <Text style={[styles.dropArrow, goldRush && { color: '#FBBF24' }]}>▼</Text>}
                       </View>
 
                       {Array.from({ length: GRID_ROWS }, (_, r) => {
@@ -756,9 +799,21 @@ export default function GameScreen({ route, navigation }) {
                   style={[styles.comboBadge, { transform: [{ scale: comboAnim }] }]}
                   pointerEvents="none"
                 >
-                  <Text style={[styles.comboText, { color: comboColor(combo) }]}>
-                    COMBO ×{Math.min(combo, MAX_COMBO_MULT)}
-                  </Text>
+                  <LinearGradient
+                    colors={[comboColor(combo) + '33', comboColor(combo) + '11']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.comboBadgeGrad}
+                  >
+                    <Text style={[styles.comboText, {
+                      color: comboColor(combo),
+                      textShadowColor: comboColor(combo),
+                      textShadowOffset: { width: 0, height: 0 },
+                      textShadowRadius: 8,
+                    }]}>
+                      COMBO ×{Math.min(combo, MAX_COMBO_MULT)}
+                    </Text>
+                  </LinearGradient>
                 </Animated.View>
               )}
             </View>
@@ -770,7 +825,7 @@ export default function GameScreen({ route, navigation }) {
           {bombMode
             ? <Text style={[styles.hintText, { color: '#ff3300' }]}>Tap a column to remove its top tile</Text>
             : goldRush
-              ? <Text style={[styles.hintText, { color: '#ffd700' }]}>★ Wildcards merge with ANY tile — scores ×{RUSH_MULT}!</Text>
+              ? <Text style={[styles.hintText, { color: '#FBBF24' }]}>⚡ Wildcards merge with ANY tile — scores ×{RUSH_MULT}!</Text>
               : <Text style={styles.hintText}>Chain merges to fill the Gold Rush meter</Text>}
         </View>
 
@@ -786,60 +841,59 @@ const styles = StyleSheet.create({
   hud: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: '#ffffff12',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   hudItem: { alignItems: 'flex-start', minWidth: 90 },
-  hudLabel: { color: '#555', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  hudScore: { color: '#fff', fontSize: 22, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  hudLabel: { color: '#64748B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  hudScore: { color: '#fff', fontSize: 26, fontWeight: '900', fontVariant: ['tabular-nums'] },
   hudCenter: { flex: 1, alignItems: 'center' },
-  gameTitle: { color: '#7c4dff', fontSize: 10, fontWeight: '900', letterSpacing: 3 },
-  rushTitle: { color: '#ffd700', fontSize: 10, fontWeight: '900', letterSpacing: 2 },
+  gameTitle: { color: '#8B5CF6', fontSize: 10, fontWeight: '900', letterSpacing: 3 },
+  rushTitle: { color: '#FBBF24', fontSize: 12, fontWeight: '900', letterSpacing: 2 },
   dangerTitle: { color: '#ff1744', fontSize: 10, fontWeight: '900', letterSpacing: 2 },
-  timerText: { fontSize: 30, fontWeight: '900', fontVariant: ['tabular-nums'], lineHeight: 34 },
+  timerText: { fontSize: 32, fontWeight: '900', fontVariant: ['tabular-nums'], lineHeight: 36 },
   timerTrack: {
-    width: 90, height: 4, borderRadius: 2,
-    backgroundColor: '#ffffff15', overflow: 'hidden', marginTop: 2,
+    width: 90, height: 6, borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden', marginTop: 3,
   },
-  timerFill: { height: 4, borderRadius: 2 },
+  timerFill: { height: 6, borderRadius: 3 },
   timeGainText: {
     position: 'absolute', top: 10, right: -14,
     color: '#00ff88', fontSize: 13, fontWeight: '900',
   },
 
-  undoBtn: {
+  // Gradient border control buttons
+  gradBtnOuter: { borderRadius: 10, padding: 1.5 },
+  gradBtnInner: {
+    backgroundColor: '#07021a',
+    borderRadius: 9,
+    paddingHorizontal: 10, paddingVertical: 5,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#ffffff12', borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 6, minWidth: 54,
+    minWidth: 50,
   },
   undoBtnIcon: { color: '#fff', fontSize: 20 },
   undoBtnLabel: { color: '#aaa', fontSize: 11, fontWeight: '700' },
 
   meterRow: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingTop: 8,
+    paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4,
   },
   meterIcon: { fontSize: 14 },
   meterTrack: {
-    flex: 1, height: 8, borderRadius: 4,
-    backgroundColor: '#ffffff10', overflow: 'hidden',
+    flex: 1, height: 10, borderRadius: 5,
+    backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden',
   },
-  meterFill: { height: 8, borderRadius: 4 },
-  meterLabel: { color: '#666', fontSize: 10, fontWeight: '800', letterSpacing: 1.5, minWidth: 70, textAlign: 'right' },
+  meterFill: { height: 10, borderRadius: 5 },
+  meterLabel: { color: '#64748B', fontSize: 10, fontWeight: '800', letterSpacing: 1.5, minWidth: 70, textAlign: 'right' },
 
   controls: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 8,
   },
   tilePreview: { alignItems: 'center', gap: 4 },
-  previewLabel: { color: '#555', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  previewLabel: { color: '#64748B', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
 
-  bombBtn: {
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#ffffff0a', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 8, minWidth: 58,
-    borderWidth: 1, borderColor: '#ffffff15',
-  },
-  bombBtnActive: { backgroundColor: '#ff330020', borderColor: '#ff3300' },
+  bombBtnActive: { opacity: 1 },
   bombIcon: { fontSize: 24 },
   bombLabel: { color: '#aaa', fontSize: 10, fontWeight: '700', marginTop: 2 },
   btnDisabled: { opacity: 0.3 },
@@ -850,12 +904,12 @@ const styles = StyleSheet.create({
   },
   rushGlow: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 10, backgroundColor: '#ffd700',
+    borderRadius: 10, backgroundColor: '#FBBF24',
   },
   grid: { flexDirection: 'row' },
 
   dropIndicator: { height: INDICATOR_H, alignItems: 'center', justifyContent: 'center' },
-  dropArrow: { color: '#7c4dff', fontSize: 12 },
+  dropArrow: { color: '#8B5CF6', fontSize: 12 },
   bombDropIcon: { fontSize: 14 },
   fullMark: { color: '#ff1744', fontSize: 12, fontWeight: '900' },
 
@@ -869,10 +923,10 @@ const styles = StyleSheet.create({
 
   wildCell: {
     backgroundColor: '#2a1f00',
-    borderColor: '#ffd700', borderWidth: 2,
-    shadowColor: '#ffd700', shadowOpacity: 0.9, shadowRadius: 6, elevation: 6,
+    borderColor: '#FBBF24', borderWidth: 2,
+    shadowColor: '#FBBF24', shadowOpacity: 0.9, shadowRadius: 6, elevation: 6,
   },
-  wildStar: { color: '#ffd700', fontWeight: '900' },
+  wildStar: { color: '#FBBF24', fontWeight: '900' },
 
   floatLabel: {
     position: 'absolute', fontSize: 17, fontWeight: '900',
@@ -890,11 +944,14 @@ const styles = StyleSheet.create({
 
   comboBadge: {
     position: 'absolute', top: -2, alignSelf: 'center',
-    backgroundColor: '#000000cc', borderRadius: 50,
-    paddingHorizontal: 16, paddingVertical: 5,
-    borderWidth: 1, borderColor: '#ffffff25',
+    borderRadius: 50, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
   },
-  comboText: { fontSize: 15, fontWeight: '900', letterSpacing: 1 },
+  comboBadgeGrad: {
+    paddingHorizontal: 18, paddingVertical: 7,
+    alignItems: 'center', borderRadius: 50,
+  },
+  comboText: { fontSize: 16, fontWeight: '900', letterSpacing: 1.5 },
 
   hint: { alignItems: 'center', paddingVertical: 8 },
   hintText: { color: '#333', fontSize: 12 },
