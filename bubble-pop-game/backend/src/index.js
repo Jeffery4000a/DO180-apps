@@ -49,10 +49,20 @@ export default {
   async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: HEADERS });
     const url = new URL(request.url);
+    const parts = url.pathname.split('/').filter(Boolean); // ['boards', 'ABC123', 'join']
     try {
       if (url.pathname === '/leaderboard' && request.method === 'GET') return await leaderboard(url, env, ctx);
       if (url.pathname === '/rank'        && request.method === 'GET') return await rank(url, env);
       if (url.pathname === '/scores'      && request.method === 'POST') return await submit(request, env);
+
+      // Private leagues
+      if (parts[0] === 'boards') {
+        if (parts.length === 1 && request.method === 'POST') return await createBoard(request, env);
+        if (parts.length === 2 && request.method === 'GET')  return await boardLeaderboard(parts[1], url, env, ctx);
+        if (parts.length === 3 && parts[2] === 'join'  && request.method === 'POST') return await joinBoard(parts[1], request, env);
+        if (parts.length === 3 && parts[2] === 'rank'  && request.method === 'GET')  return await boardRank(parts[1], url, env);
+      }
+
       return json({ error: 'not found' }, 404);
     } catch (e) {
       return json({ error: 'server error' }, 500);
@@ -118,6 +128,104 @@ async function rank(url, env) {
       'SELECT COUNT(*) AS n FROM scores WHERE score > ?1'
     ).bind(me.score).first();
   }
+  return json({ rank: (row?.n ?? 0) + 1 }, 200, { 'Cache-Control': 'no-store' });
+}
+
+// ── Private Boards ────────────────────────────────────────────────────────────
+
+const BOARD_LIMIT_PRIVATE = 50;
+const MAX_BOARD_NAME_LEN = 24;
+
+async function createBoard(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'bad json' }, 400); }
+
+  const code = String(body.code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  const name = String(body.name ?? '').replace(/[^\w .\-!?]/g, '').trim().slice(0, MAX_BOARD_NAME_LEN) || 'Unnamed League';
+  const device = String(body.deviceId ?? '').slice(0, 64);
+
+  if (code.length < 4 || device.length < 8) return json({ error: 'bad input' }, 400);
+
+  // Idempotent: if this device already created a board with this code, return it
+  await env.DB.prepare(`
+    INSERT INTO boards (code, name, owner_device, created_at)
+    VALUES (?1, ?2, ?3, ?4)
+    ON CONFLICT(code) DO NOTHING
+  `).bind(code, name, device, Date.now()).run();
+
+  // Auto-join the creator
+  await env.DB.prepare(`
+    INSERT INTO board_members (code, device_id, joined_at)
+    VALUES (?1, ?2, ?3)
+    ON CONFLICT(code, device_id) DO NOTHING
+  `).bind(code, device, Date.now()).run();
+
+  return json({ ok: true, code, name });
+}
+
+async function joinBoard(code, request, env) {
+  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'bad json' }, 400); }
+  const device = String(body.deviceId ?? '').slice(0, 64);
+  if (clean.length < 4 || device.length < 8) return json({ error: 'bad input' }, 400);
+
+  const board = await env.DB.prepare('SELECT name FROM boards WHERE code = ?1').bind(clean).first();
+  if (!board) return json({ error: 'not_found' }, 404);
+
+  await env.DB.prepare(`
+    INSERT INTO board_members (code, device_id, joined_at)
+    VALUES (?1, ?2, ?3)
+    ON CONFLICT(code, device_id) DO NOTHING
+  `).bind(clean, device, Date.now()).run();
+
+  return json({ ok: true, name: board.name });
+}
+
+async function boardLeaderboard(code, url, env, ctx) {
+  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  if (clean.length < 4) return json({ error: 'bad code' }, 400);
+
+  const board = await env.DB.prepare('SELECT name FROM boards WHERE code = ?1').bind(clean).first();
+  if (!board) return json({ error: 'not_found' }, 404);
+
+  // Edge cache per board (shorter TTL since boards are small + personalized)
+  const cache = caches.default;
+  const cacheKey = new Request(`https://board.cache/boards/${clean}`);
+  const hit = await cache.match(cacheKey);
+  if (hit) return hit;
+
+  const { results } = await env.DB.prepare(`
+    SELECT s.device_id, s.name, s.country, s.score
+    FROM board_members bm
+    JOIN scores s ON s.device_id = bm.device_id
+    WHERE bm.code = ?1
+    ORDER BY s.score DESC
+    LIMIT ?2
+  `).bind(clean, BOARD_LIMIT_PRIVATE).all();
+
+  const res = json({ entries: results, boardName: board.name }, 200, {
+    'Cache-Control': `public, s-maxage=20, max-age=10`,
+  });
+  ctx.waitUntil(cache.put(cacheKey, res.clone()));
+  return res;
+}
+
+async function boardRank(code, url, env) {
+  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  const device = (url.searchParams.get('device') ?? '').slice(0, 64);
+  if (!device || clean.length < 4) return json({ rank: null });
+
+  const me = await env.DB.prepare('SELECT score FROM scores WHERE device_id = ?1').bind(device).first();
+  if (!me) return json({ rank: null });
+
+  const row = await env.DB.prepare(`
+    SELECT COUNT(*) AS n
+    FROM board_members bm
+    JOIN scores s ON s.device_id = bm.device_id
+    WHERE bm.code = ?1 AND s.score > ?2
+  `).bind(clean, me.score).first();
+
   return json({ rank: (row?.n ?? 0) + 1 }, 200, { 'Cache-Control': 'no-store' });
 }
 

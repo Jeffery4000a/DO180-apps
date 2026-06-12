@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Share } from 'react-native';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Leaderboard service
@@ -20,11 +21,12 @@ const CACHE_TTL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 6_000;
 
 const KEYS = {
-  name:   'dm_player_name',
-  geo:    'dm_player_geo',
-  best:   'dm_lb_best_score',
-  device: 'dm_device_id',
-  cache:  'dm_lb_cache_',   // + scope
+  name:     'dm_player_name',
+  geo:      'dm_player_geo',
+  best:     'dm_lb_best_score',
+  device:   'dm_device_id',
+  cache:    'dm_lb_cache_',   // + scope
+  myBoards: 'dm_my_boards',  // private leagues
 };
 
 // ── Country → region mapping (must match backend/src/index.js) ──────────────
@@ -253,4 +255,147 @@ async function buildSimBoard(scope) {
     playerRank: playerIdx >= 0 ? playerIdx + 1 : null,
     geo,
   };
+}
+
+// ── Private Leagues ───────────────────────────────────────────────────────────
+
+const BOARD_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+export function generateBoardCode() {
+  return Array.from({ length: 6 }, () =>
+    BOARD_CODE_CHARS[Math.floor(Math.random() * BOARD_CODE_CHARS.length)]
+  ).join('');
+}
+
+export async function getMyBoards() {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.myBoards);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+async function saveBoards(boards) {
+  try { await AsyncStorage.setItem(KEYS.myBoards, JSON.stringify(boards)); } catch {}
+}
+
+export async function createCustomBoard(boardName) {
+  const code = generateBoardCode();
+  const board = { code, name: boardName.trim().slice(0, 24), created: Date.now(), isOwner: true };
+
+  const boards = await getMyBoards();
+  await saveBoards([board, ...boards]);
+
+  if (API_URL) {
+    try {
+      const deviceId = await getDeviceId();
+      await withTimeout(fetch(`${API_URL}/boards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, name: board.name, deviceId }),
+      }));
+    } catch {}
+  }
+  return board;
+}
+
+export async function joinCustomBoard(code) {
+  const clean = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  if (clean.length < 4) return { error: 'invalid_code' };
+
+  const boards = await getMyBoards();
+  if (boards.find(b => b.code === clean)) return { error: 'already_joined' };
+
+  let boardName = clean;
+  if (API_URL) {
+    try {
+      const deviceId = await getDeviceId();
+      const res = await withTimeout(fetch(`${API_URL}/boards/${clean}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceId }),
+      }));
+      const data = await res.json();
+      if (data.error) return { error: data.error };
+      boardName = data.name ?? clean;
+    } catch {}
+  }
+
+  const board = { code: clean, name: boardName, created: Date.now(), isOwner: false };
+  await saveBoards([...boards, board]);
+  return board;
+}
+
+export async function leaveCustomBoard(code) {
+  const boards = await getMyBoards();
+  await saveBoards(boards.filter(b => b.code !== code));
+  delete memCache['board_' + code];
+}
+
+export async function shareBoard(code, name) {
+  try {
+    await Share.share({
+      message: `Join my Drop Merge league "${name}"!\nEnter code: ${code}\nDownload the app to compete!`,
+      title: 'Drop Merge League Invite',
+    });
+  } catch {}
+}
+
+export async function getPrivateLeaderboard(code) {
+  const cacheKey = 'board_' + code;
+  const cached = memCache[cacheKey];
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.data;
+
+  let data;
+  if (API_URL) {
+    try {
+      const [deviceId] = await Promise.all([getDeviceId()]);
+      const [boardRes, rankRes] = await Promise.all([
+        withTimeout(fetch(`${API_URL}/boards/${code}`)),
+        withTimeout(fetch(`${API_URL}/boards/${code}/rank?device=${encodeURIComponent(deviceId)}`)),
+      ]);
+      const { entries: raw, boardName } = await boardRes.json();
+      const { rank } = await rankRes.json();
+      const entries = (raw ?? []).map(e => ({
+        name: e.name, country: e.country, score: e.score, you: e.device_id === deviceId,
+      }));
+      data = { entries, playerRank: rank, boardName };
+    } catch {
+      data = await buildSimPrivateBoard(code);
+    }
+  } else {
+    data = await buildSimPrivateBoard(code);
+  }
+
+  memCache[cacheKey] = { ts: Date.now(), data };
+  return data;
+}
+
+async function buildSimPrivateBoard(code) {
+  const [name, geo] = await Promise.all([getPlayerName(), detectGeo()]);
+  let best = 0;
+  try {
+    const v = await AsyncStorage.getItem(KEYS.best);
+    best = v ? parseInt(v, 10) : 0;
+  } catch {}
+
+  // Deterministic but varied sim friends based on code hash
+  const seed = code.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+  const pick = (arr, n) => {
+    const out = [];
+    for (let i = 0; i < n && i < arr.length; i++) out.push(arr[(seed * (i + 1) * 7) % arr.length]);
+    return out;
+  };
+  const friends = pick(SIM_PLAYERS, 7);
+  const scoreMult = 0.15 + (seed % 60) / 100;
+
+  let entries = friends.map(([n, c, s]) => ({
+    name: n, country: c, score: Math.floor(s * scoreMult),
+  }));
+  entries.push({ name: name || 'You', country: geo.code, score: best, you: true });
+  entries.sort((a, b) => b.score - a.score);
+
+  const boards = await getMyBoards();
+  const board = boards.find(b => b.code === code);
+  const playerIdx = entries.findIndex(e => e.you);
+  return { entries, playerRank: playerIdx >= 0 ? playerIdx + 1 : null, boardName: board?.name ?? code };
 }
