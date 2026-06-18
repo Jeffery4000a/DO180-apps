@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Drop Merge",
+    "slug": "drop-merge-game",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a1a"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourcompany.dropmerge"
+    },
+    "android": {
+      "package": "com.yourcompany.dropmerge",
+      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE"]
+    },
+    "plugins": []
+  }
+}
